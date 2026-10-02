@@ -7,38 +7,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id           String    @id @default(uuid())
-  name         String
-  email        String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  bookings     Booking[]
-}
-
-model Centre {
-  id        String           @id @default(uuid())
-  name      String
-  location  String
-  address   String?
-  phone     String?
-  createdAt DateTime         @default(now())
-  tests     DiagnosticTest[]
-  bookings  Booking[]
-}
-
-model DiagnosticTest {
-  id          String   @id @default(uuid())
-  centreId    String
-  centre      Centre   @relation(fields: [centreId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  price       Decimal  @db.Decimal(10, 2)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  bookings    Booking[]
-
-  @@unique([centreId, name])
+enum Role {
+  USER
+  ADMIN
 }
 
 enum BookingStatus {
@@ -52,43 +23,101 @@ enum PaymentStatus {
   PENDING
   SUCCESS
   FAILED
+  REFUNDED
+}
+
+enum WebhookOutcome {
+  APPLIED
+  IGNORED
+}
+
+model User {
+  id           String    @id @default(uuid())
+  name         String
+  email        String    @unique
+  passwordHash String
+  role         Role      @default(USER)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  bookings     Booking[]
+}
+
+model Centre {
+  id        String           @id @default(uuid())
+  name      String
+  location  String
+  address   String?
+  phone     String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  tests     DiagnosticTest[]
+  bookings  Booking[]
+}
+
+model DiagnosticTest {
+  id          String    @id @default(uuid())
+  centreId    String
+  centre      Centre    @relation(fields: [centreId], references: [id], onDelete: Restrict)
+  name        String
+  description String?
+  price       Decimal   @db.Decimal(10, 2)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bookings    Booking[]
+
+  @@unique([centreId, name])
+  @@unique([id, centreId])
 }
 
 model Booking {
-  id            String        @id @default(uuid())
+  id            String         @id @default(uuid())
   userId        String
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Restrict)
   centreId      String
-  centre        Centre        @relation(fields: [centreId], references: [id])
+  centre        Centre         @relation(fields: [centreId], references: [id], onDelete: Restrict)
   testId        String
-  test          DiagnosticTest @relation(fields: [testId], references: [id])
+  test          DiagnosticTest @relation(fields: [testId, centreId], references: [id, centreId], onDelete: Restrict)
   appointmentAt DateTime
-  amount        Decimal       @db.Decimal(10, 2)
-  status        BookingStatus @default(PENDING)
-  createdAt     DateTime      @default(now())
-  payment       Payment?
+  amount        Decimal        @db.Decimal(10, 2)
+  status        BookingStatus  @default(PENDING)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  payments      Payment[]
 
-  @@index([userId])
+  @@index([userId, createdAt])
+  @@index([centreId])
+  @@index([testId, centreId])
 }
 
+// One row per payment attempt. The init migration also adds a partial unique index in raw SQL
+// (Payment_bookingId_active_key): at most one PENDING or SUCCESS attempt per booking.
 model Payment {
-  id             String        @id @default(uuid())
-  bookingId      String        @unique
-  booking        Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  amount         Decimal       @db.Decimal(10, 2)
-  status         PaymentStatus @default(PENDING)
-  providerTxnId  String        @unique @default(uuid())
-  idempotencyKey String?       @unique
-  createdAt      DateTime      @default(now())
+  id             String         @id @default(uuid())
+  bookingId      String
+  booking        Booking        @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  amount         Decimal        @db.Decimal(10, 2)
+  status         PaymentStatus  @default(PENDING)
+  providerTxnId  String?        @unique
+  idempotencyKey String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  webhookEvents  WebhookEvent[]
+
+  @@index([bookingId])
 }
 
 model WebhookEvent {
-  eventId     String    @id
-  paymentId   String?
-  bookingId   String?
-  status      String
+  eventId     String          @id
+  paymentId   String
+  payment     Payment         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  status      PaymentStatus
   payload     Json
-  receivedAt  DateTime  @default(now())
+  outcome     WebhookOutcome?
+  attempts    Int             @default(0)
+  lastError   String?
+  receivedAt  DateTime        @default(now())
   processedAt DateTime?
-  deduped     Boolean   @default(false)
+
+  @@index([paymentId])
 }

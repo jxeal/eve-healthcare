@@ -1,12 +1,15 @@
 'use strict';
 
-// Demo seed: 3 centres × 2–3 diagnostic tests. Idempotent-ish (skips
-// existing rows by name). Run: `npm run seed` (see package.json).
+// Demo data: an admin account plus 3 centres with 2-3 tests each. Safe to re-run.
 const { PrismaClient } = require('@prisma/client');
+const { hash } = require('../src/utils/password');
 
 const prisma = new PrismaClient();
 
-const DATA = [
+const ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL || 'admin@eve.local').toLowerCase();
+const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin@12345';
+
+const CENTRES = [
   {
     name: 'Apollo Diagnostics',
     location: 'Bengaluru',
@@ -42,25 +45,23 @@ const DATA = [
 ];
 
 async function main() {
-  for (const c of DATA) {
-    let centre = await prisma.centre.findFirst({ where: { name: c.name } });
-    if (!centre) {
-      centre = await prisma.centre.create({
-        data: { name: c.name, location: c.location, address: c.address, phone: c.phone },
+  await prisma.user.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: { role: 'ADMIN' },
+    create: { name: 'Admin', email: ADMIN_EMAIL, passwordHash: await hash(ADMIN_PASSWORD), role: 'ADMIN' },
+  });
+  console.log(`admin: ${ADMIN_EMAIL}`);
+
+  for (const { tests, ...data } of CENTRES) {
+    const centre = (await prisma.centre.findFirst({ where: { name: data.name } })) || (await prisma.centre.create({ data }));
+    for (const test of tests) {
+      await prisma.diagnosticTest.upsert({
+        where: { centreId_name: { centreId: centre.id, name: test.name } },
+        update: {},
+        create: { ...test, centreId: centre.id },
       });
-      console.log(`centre: ${centre.name}`);
     }
-    for (const t of c.tests) {
-      try {
-        await prisma.diagnosticTest.create({
-          data: { centreId: centre.id, name: t.name, price: t.price, description: t.description },
-        });
-        console.log(`  test: ${t.name} @ ${centre.name}`);
-      } catch (err) {
-        if (err && err.code === 'P2002') continue; // already seeded
-        throw err;
-      }
-    }
+    console.log(`centre: ${centre.name} (${tests.length} tests)`);
   }
 }
 
