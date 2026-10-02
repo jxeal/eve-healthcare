@@ -177,6 +177,14 @@ describe('Idempotency-Key', () => {
     expect((await bookingRow(b2.id)).status).toBe('PENDING');
   });
 
+  test('keys are case-sensitive, so keys differing only in case are separate requests', async () => {
+    const key = idemKey();
+    const first = await pay((await makeBooking()).id, { simulate: 'SUCCESS', key: key.toUpperCase() });
+    const second = await pay((await makeBooking()).id, { simulate: 'SUCCESS', key: key.toLowerCase() });
+    expect([first.status, second.status]).toEqual([201, 201]);
+    expect(first.body.id).not.toBe(second.body.id);
+  });
+
   test('keys are scoped per user', async () => {
     const key = idemKey();
     const a = await pay((await makeBooking(alice.token)).id, { simulate: 'SUCCESS', key, tok: alice.token });

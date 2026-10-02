@@ -1,8 +1,9 @@
 const { normalizeKey, scopedKey } = require('../../src/utils/idempotency');
 
 describe('idempotency keys', () => {
-  test('normalizes case and whitespace; different keys differ; empty rejected', () => {
-    expect(normalizeKey('  ABC-123 ')).toBe(normalizeKey('abc-123'));
+  test('trims whitespace but keeps case; different keys differ; empty rejected', () => {
+    expect(normalizeKey('  ABC-123 ')).toBe(normalizeKey('ABC-123'));
+    expect(normalizeKey('ABC-123')).not.toBe(normalizeKey('abc-123'));
     expect(normalizeKey('key-one')).not.toBe(normalizeKey('key-two'));
     expect(() => normalizeKey('')).toThrow();
     expect(() => normalizeKey(null)).toThrow();
