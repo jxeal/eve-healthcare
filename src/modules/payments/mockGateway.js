@@ -1,33 +1,28 @@
 'use strict';
 
 const { randomUUID } = require('crypto');
-
-const LEDGER_LIMIT = 10000;
-// Stands in for the provider's own records, keyed by our payment id; lost on restart.
-const ledger = new Map();
+const { prisma } = require('../../config/db');
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function record(reference, charge) {
-  ledger.set(reference, charge);
-  if (ledger.size > LEDGER_LIMIT) ledger.delete(ledger.keys().next().value);
-  return { ...charge };
-}
+const view = (charge) => charge && { providerTxnId: charge.providerTxnId, status: charge.status };
 
-async function charge({ reference, simulate }) {
+async function charge({ reference, amount, simulate }) {
   await delay(50 + Math.floor(Math.random() * 101));
   const status = simulate || (Math.random() < 0.8 ? 'SUCCESS' : 'FAILED');
-  return record(reference, { providerTxnId: randomUUID(), status });
+  return view(
+    await prisma.simulatedCharge.create({ data: { reference, amount, status, providerTxnId: randomUUID() } }),
+  );
 }
 
 async function retrieve(reference) {
-  const existing = ledger.get(reference);
-  return existing ? { ...existing } : null;
+  return view(await prisma.simulatedCharge.findUnique({ where: { reference } }));
 }
 
+// Returns the charge as it stands afterwards, which may already have settled.
 async function cancel(reference) {
-  const existing = ledger.get(reference);
-  if (existing && existing.status === 'PENDING') record(reference, { ...existing, status: 'FAILED' });
+  await prisma.simulatedCharge.updateMany({ where: { reference, status: 'PENDING' }, data: { status: 'FAILED' } });
+  return retrieve(reference);
 }
 
 module.exports = { charge, retrieve, cancel };

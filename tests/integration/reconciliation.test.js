@@ -1,3 +1,5 @@
+const path = require('path');
+const { spawnSync } = require('child_process');
 const request = require('supertest');
 const { getApp } = require('../helpers/app');
 const { signupUser, createAdmin, authHeader } = require('../helpers/auth');
@@ -13,6 +15,20 @@ let centre;
 let diagTest;
 
 const minutesFromNow = (minutes) => new Date(Date.now() + minutes * 60 * 1000);
+
+// A separate process shares no memory with this one, like an extra `npm run worker`.
+function reconcileInAnotherProcess(now) {
+  const script =
+    "require('./src/modules/payments/reconciliation.service').runReconciliation({ now: new Date(process.argv[1]) })" +
+    '.then(() => process.exit(0), (err) => { console.error(err); process.exit(1); })';
+  const result = spawnSync(process.execPath, ['-e', script, now.toISOString()], {
+    cwd: path.join(__dirname, '../..'),
+    env: process.env,
+    encoding: 'utf8',
+    timeout: 20000,
+  });
+  if (result.status !== 0) throw new Error(`reconciliation process failed: ${result.stderr}`);
+}
 
 beforeAll(async () => {
   user = await signupUser();
@@ -94,6 +110,23 @@ describe('Payments whose save step fails', () => {
   });
 });
 
+describe('Reconciliation in another process', () => {
+  test('sees the same provider records, so pending charges wait and lost saves settle', async () => {
+    const pendingBooking = await makeBooking();
+    expect((await pay(pendingBooking.id, 'PENDING')).status).toBe(202);
+    const lostBooking = await makeBooking();
+    failSettleTransactions();
+    expect((await pay(lostBooking.id, 'SUCCESS')).status).toBe(202);
+    jest.restoreAllMocks();
+
+    reconcileInAnotherProcess(minutesFromNow(5));
+
+    expect((await latestPayment(pendingBooking.id)).status).toBe('PENDING');
+    expect((await latestPayment(lostBooking.id)).status).toBe('SUCCESS');
+    expect(await bookingStatus(lostBooking.id)).toBe('CONFIRMED');
+  });
+});
+
 describe('Provider-pending payments', () => {
   test('wait for the provider, then expire so the booking can be cancelled', async () => {
     const booking = await makeBooking();
@@ -107,6 +140,25 @@ describe('Provider-pending payments', () => {
     expect((await latestPayment(booking.id)).status).toBe('FAILED');
     expect((await gateway.retrieve((await latestPayment(booking.id)).id)).status).toBe('FAILED');
     expect((await cancel(booking.id)).status).toBe(200);
+  });
+});
+
+describe('Provider-pending payments that settle while expiring', () => {
+  test('are applied with the provider outcome instead of failed', async () => {
+    const booking = await makeBooking();
+    const { body: payment } = await pay(booking.id, 'PENDING');
+    await prisma.simulatedCharge.update({ where: { reference: payment.id }, data: { status: 'SUCCESS' } });
+    const realRetrieve = gateway.retrieve;
+    let stale = true;
+    jest.spyOn(gateway, 'retrieve').mockImplementation(async (reference) => {
+      if (reference !== payment.id || !stale) return realRetrieve(reference);
+      stale = false;
+      return { providerTxnId: payment.providerTxnId, status: 'PENDING' };
+    });
+
+    await runReconciliation({ now: minutesFromNow(31) });
+    expect((await latestPayment(booking.id)).status).toBe('SUCCESS');
+    expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
   });
 });
 
@@ -128,6 +180,16 @@ describe('Webhook events left unprocessed', () => {
     expect(summary.webhookEvents.processed).toBeGreaterThanOrEqual(1);
     expect(await prisma.webhookEvent.findUnique({ where: { eventId } })).toMatchObject({ outcome: 'APPLIED' });
     expect(await bookingStatus(booking.id)).toBe('CONFIRMED');
+  });
+
+  test('a stored provider event wins even when the provider lookup misses', async () => {
+    const { booking, eventId } = await storedEvent();
+    const payment = await latestPayment(booking.id);
+    await prisma.simulatedCharge.delete({ where: { reference: payment.id } });
+
+    await runReconciliation({ now: minutesFromNow(5) });
+    expect((await latestPayment(booking.id)).status).toBe('SUCCESS');
+    expect(await prisma.webhookEvent.findUnique({ where: { eventId } })).toMatchObject({ outcome: 'APPLIED' });
   });
 
   test('a failing event keeps its error and attempt count for the next sweep', async () => {

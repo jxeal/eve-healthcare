@@ -103,7 +103,7 @@ BID2=$(curl -s $API/bookings -H "Authorization: Bearer $TOKEN" -H 'Content-Type:
   -d "{\"centreId\":\"$CID\",\"testId\":\"$TID\",\"appointmentAt\":\"2030-01-02T10:00:00Z\"}" | json id)
 PID=$(curl -s $API/payments -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d "{\"bookingId\":\"$BID2\",\"simulate\":\"PENDING\"}" | json id)
-npm run webhook -- $PID SUCCESS evt-1   # signs with WEBHOOK_SECRET and posts
+npm run webhook -- $PID SUCCESS evt-1   # settles the provider's record, then posts a signed webhook
 npm run webhook -- $PID SUCCESS evt-1   # same event again: {"deduped":true}
 ```
 
@@ -131,6 +131,8 @@ User 1──* Booking *──1 Centre 1──* DiagnosticTest
   prices and amounts above zero even for writes that bypass the API. Every foreign key is
   `ON DELETE RESTRICT`, so deleting a user or centre can never cascade away payment records.
 - `User.email` is `CITEXT`, so the unique index rejects addresses that differ only in case.
+- `SimulatedCharge` belongs to the mock gateway, not the app. It is the provider's record of each
+  charge, keyed by our payment id and deliberately not linked to `Payment`.
 
 ### Booking states
 
@@ -187,12 +189,13 @@ and `npm run worker` adds more worker processes.
 - `process-webhook-event` retries a deferred webhook event up to 5 times with exponential backoff
   from 2 s. Every retry is a new job, because BullMQ silently skips an add whose job id it still
   remembers.
-- `reconcile-payments` runs every `RECONCILE_INTERVAL_SEC` (60). It asks the gateway about every
-  attempt that has been PENDING longer than `PAYMENT_STALE_AFTER_SEC` (120): a final result is
+- `reconcile-payments` runs every `RECONCILE_INTERVAL_SEC` (60). It first reprocesses webhook
+  events left unprocessed for `WEBHOOK_RETRY_AFTER_SEC` (60), so a lost retry job or a Redis outage
+  only delays them, and the provider's own word is applied before any lookup. Then it asks the
+  gateway about every attempt PENDING longer than `PAYMENT_STALE_AFTER_SEC` (120): a final result is
   applied, a charge the gateway never saw is marked FAILED, and a charge still pending at the
-  provider after `PAYMENT_PENDING_EXPIRY_SEC` (1800) is cancelled and marked FAILED. Either way the
-  booking can be paid again or cancelled. The same job reprocesses webhook events left unprocessed
-  for `WEBHOOK_RETRY_AFTER_SEC` (60), so a lost retry job or a Redis outage only delays them.
+  provider after `PAYMENT_PENDING_EXPIRY_SEC` (1800) is cancelled and marked FAILED, unless the
+  provider settled it in the meantime. Either way the booking can be paid again or cancelled.
 
 On SIGTERM the server stops accepting connections, lets in-flight requests finish, then closes the
 worker, the queue and the database pool. The Docker image runs node through `exec` so it receives
@@ -212,9 +215,9 @@ the signal.
 
 - The mock gateway answers synchronously unless `simulate: "PENDING"` asks it to behave like an
   asynchronous provider. That mode is what gives the webhook something to settle.
-- The mock gateway keeps its ledger in memory, standing in for the provider's payment-status API.
-  After a restart it has forgotten earlier charges, so reconciliation marks those attempts FAILED;
-  a real provider would report the true outcome.
+- The mock gateway records each charge in its own `SimulatedCharge` table, standing in for the
+  provider's payment-status API. Every process reads the same records, so reconciliation gives the
+  same answer whichever worker runs it, and after restarts.
 - A settled payment (SUCCESS, FAILED or REFUNDED) is final. A provider that changes its mind after
   the fact would need a dispute or refund flow, which is out of scope.
 - Diagnostic tests are retired with `isActive: false` instead of deleted, because bookings

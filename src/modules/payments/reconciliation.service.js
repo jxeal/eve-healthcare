@@ -45,8 +45,13 @@ async function reconcilePayment(payment, now) {
   if (!charge) return settleAs(payment, 'FAILED', null, 'unknown_to_provider');
   if (charge.status !== 'PENDING') return settleAs(payment, charge.status, charge.providerTxnId, 'provider_result');
   if (now - payment.createdAt < config.reconcile.pendingExpirySec * 1000) return 'still_pending';
-  await gateway.cancel(payment.id);
-  return settleAs(payment, 'FAILED', charge.providerTxnId, 'expired');
+  const final = await gateway.cancel(payment.id);
+  return settleAs(
+    payment,
+    final.status,
+    final.providerTxnId,
+    final.status === 'FAILED' ? 'expired' : 'provider_result',
+  );
 }
 
 async function retryWebhookEvent(event) {
@@ -74,15 +79,7 @@ function tally(counts, handle) {
 
 async function runReconciliation({ now = new Date() } = {}) {
   const summary = { payments: {}, webhookEvents: {} };
-  const stalePayments = { status: 'PENDING', createdAt: { lt: secondsBefore(now, config.reconcile.staleAfterSec) } };
-  await forEachRow(
-    'payment',
-    stalePayments,
-    'createdAt',
-    'id',
-    tally(summary.payments, (p) => reconcilePayment(p, now)),
-  );
-
+  // Stored provider events go first, so a provider's SUCCESS is applied before any lookup-based decision.
   const staleEvents = {
     processedAt: null,
     receivedAt: { lt: secondsBefore(now, config.reconcile.webhookRetryAfterSec) },
@@ -93,6 +90,15 @@ async function runReconciliation({ now = new Date() } = {}) {
     'receivedAt',
     'eventId',
     tally(summary.webhookEvents, retryWebhookEvent),
+  );
+
+  const stalePayments = { status: 'PENDING', createdAt: { lt: secondsBefore(now, config.reconcile.staleAfterSec) } };
+  await forEachRow(
+    'payment',
+    stalePayments,
+    'createdAt',
+    'id',
+    tally(summary.payments, (p) => reconcilePayment(p, now)),
   );
 
   if (Object.keys(summary.payments).length || Object.keys(summary.webhookEvents).length) {

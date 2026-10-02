@@ -79,7 +79,7 @@ async function settlePayment(paymentId, { status, providerTxnId }) {
 // On failure the attempt stays PENDING; reconciliation settles it from the provider's record.
 async function chargeAndSettle(attempt, simulate) {
   try {
-    const result = await gateway.charge({ reference: attempt.id, simulate });
+    const result = await gateway.charge({ reference: attempt.id, amount: attempt.amount, simulate });
     return (await settlePayment(attempt.id, result)).payment;
   } catch (err) {
     logger.error({ event: 'payment.settle_deferred', paymentId: attempt.id, err });
