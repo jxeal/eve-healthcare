@@ -13,9 +13,9 @@ process.env.RATE_LIMIT_WEBHOOK_MAX = '10000';
 const http = require('http');
 http.globalAgent = new http.Agent({ keepAlive: false });
 
-// Each test file gets its own PrismaClient and server; release them so nothing lingers between files.
+// Each test file gets its own server, PrismaClient and Redis client; close them so jest can exit.
 afterAll(async () => {
   if (global.__testServer) await new Promise((resolve) => global.__testServer.close(resolve));
-  const { prisma } = require('../src/config/db');
-  await prisma.$disconnect();
+  require('../src/config/redis').closeCache();
+  await require('../src/config/db').prisma.$disconnect();
 });

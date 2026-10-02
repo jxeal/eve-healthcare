@@ -1,6 +1,6 @@
 'use strict';
 
-// Best-effort cache: every helper degrades to a miss / no-op when Redis is down.
+// Best-effort cache: every helper degrades to a miss or a no-op when Redis is down.
 const Redis = require('ioredis');
 const config = require('./index');
 const logger = require('../utils/logger');
@@ -23,37 +23,21 @@ async function ensureConnected() {
   }
 }
 
-// An open socket keeps jest alive, so under test drop it after a short idle window.
-let idleTimer = null;
-function scheduleIdleDisconnect() {
-  if (config.env !== 'test') return;
-  clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    if (client.status === 'ready') client.disconnect();
-  }, 500);
-  idleTimer.unref();
-}
-
 async function withClient(fn, fallback) {
   try {
     if (!(await ensureConnected())) return fallback;
-    const result = await fn();
-    scheduleIdleDisconnect();
-    return result;
+    return await fn();
   } catch {
     return fallback;
   }
 }
 
-async function cacheGet(key) {
-  return withClient(async () => {
-    const raw = await client.get(key);
-    return raw ? JSON.parse(raw) : null;
-  }, null);
-}
-
-async function cacheSet(key, value, ttlSec = 60) {
-  return withClient(() => client.set(key, JSON.stringify(value), 'EX', ttlSec));
+async function cached(key, ttlSec, load) {
+  const hit = await withClient(async () => JSON.parse(await client.get(key)), null);
+  if (hit) return hit;
+  const value = await load();
+  await withClient(() => client.set(key, JSON.stringify(value), 'EX', ttlSec));
+  return value;
 }
 
 async function cacheDel(...keys) {
@@ -75,4 +59,4 @@ function closeCache() {
   client.disconnect();
 }
 
-module.exports = { cacheGet, cacheSet, cacheDel, cacheDelPattern, closeCache };
+module.exports = { cached, cacheDel, cacheDelPattern, closeCache };

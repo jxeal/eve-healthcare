@@ -2,25 +2,21 @@
 
 const { prisma } = require('../../config/db');
 const { parsePagination, buildPagination } = require('../../utils/pagination');
-const { cacheGet, cacheSet } = require('../../config/redis');
+const { cached } = require('../../config/redis');
 
 const TTL_SEC = 60;
 
 async function listTestsFlat(query = {}) {
   const { page, limit, skip, take } = parsePagination(query);
   const { centreId } = query;
-  const cacheKey = `eve:tests:flat:${centreId || 'all'}:${page}:${limit}`;
-  const hit = await cacheGet(cacheKey);
-  if (hit) return hit;
-
-  const where = { isActive: true, ...(centreId ? { centreId } : {}) };
-  const [rows, total] = await Promise.all([
-    prisma.diagnosticTest.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } }),
-    prisma.diagnosticTest.count({ where }),
-  ]);
-  const result = { data: rows, pagination: buildPagination({ page, limit, total }) };
-  await cacheSet(cacheKey, result, TTL_SEC);
-  return result;
+  return cached(`eve:tests:flat:${centreId || 'all'}:${page}:${limit}`, TTL_SEC, async () => {
+    const where = { isActive: true, ...(centreId ? { centreId } : {}) };
+    const [rows, total] = await Promise.all([
+      prisma.diagnosticTest.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } }),
+      prisma.diagnosticTest.count({ where }),
+    ]);
+    return { data: rows, pagination: buildPagination({ page, limit, total }) };
+  });
 }
 
 module.exports = { listTestsFlat };
