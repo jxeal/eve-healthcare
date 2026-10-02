@@ -1,41 +1,21 @@
 'use strict';
 
-// Null-safe Redis client. All cache helpers degrade gracefully (return
-// null / no-op) when Redis is down so requests fall through to the DB.
+// Best-effort cache: every helper degrades to a miss / no-op when Redis is down.
 const Redis = require('ioredis');
 const config = require('./index');
 const logger = require('../utils/logger');
 
-let client = null;
-try {
-  client = new Redis(config.redisUrl, {
-    enableOfflineQueue: false,
-    maxRetriesPerRequest: 1,
-    lazyConnect: true,
-    retryStrategy: (times) => Math.min(times * 100, 2000),
-  });
-  client.on('error', (err) => logger.warn({ event: 'redis.error', err: err && err.message }));
-} catch (err) {
-  logger.warn({ event: 'redis.init_failed', err: err && err.message });
-  client = null;
-}
-
-async function isRedisUp() {
-  try {
-    if (!(await ensureConnected())) return false;
-    const pong = await client.ping();
-    scheduleIdleDisconnect();
-    return pong === 'PONG';
-  } catch {
-    return false;
-  }
-}
+const client = new Redis(config.redisUrl, {
+  enableOfflineQueue: false,
+  maxRetriesPerRequest: 1,
+  lazyConnect: true,
+  retryStrategy: (times) => Math.min(times * 100, 2000),
+});
+client.on('error', (err) => logger.warn({ event: 'redis.error', err: err.message }));
 
 async function ensureConnected() {
   try {
-    if (!client) return false;
-    if (client.status === 'ready') return true;
-    if (client.status === 'connect' || client.status === 'connecting') return true;
+    if (['ready', 'connect', 'connecting'].includes(client.status)) return true;
     await client.connect();
     return true;
   } catch {
@@ -43,55 +23,52 @@ async function ensureConnected() {
   }
 }
 
-// Under jest the open Redis socket keeps the event loop alive, so `npm
-// test` (no --forceExit) would never exit. In test env only, drop the
-// connection after a short idle window via an unref'd timer (the timer
-// itself never blocks exit); the next cache op transparently reconnects.
+// An open socket keeps jest alive, so under test drop it after a short idle window.
 let idleTimer = null;
 function scheduleIdleDisconnect() {
-  if (!client || process.env.NODE_ENV !== 'test') return;
-  if (idleTimer) clearTimeout(idleTimer);
+  if (config.env !== 'test') return;
+  clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    idleTimer = null;
-    try {
-      if (client.status === 'ready') client.disconnect();
-    } catch {
-      // ignore
-    }
+    if (client.status === 'ready') client.disconnect();
   }, 500);
-  if (typeof idleTimer.unref === 'function') idleTimer.unref();
+  idleTimer.unref();
+}
+
+async function withClient(fn, fallback) {
+  try {
+    if (!(await ensureConnected())) return fallback;
+    const result = await fn();
+    scheduleIdleDisconnect();
+    return result;
+  } catch {
+    return fallback;
+  }
 }
 
 async function cacheGet(key) {
-  try {
-    if (!(await ensureConnected())) return null;
+  return withClient(async () => {
     const raw = await client.get(key);
-    scheduleIdleDisconnect();
     return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  }, null);
 }
 
 async function cacheSet(key, value, ttlSec = 60) {
-  try {
-    if (!(await ensureConnected())) return;
-    await client.set(key, JSON.stringify(value), 'EX', ttlSec);
-    scheduleIdleDisconnect();
-  } catch {
-    // ignore — cache is best-effort
-  }
+  return withClient(() => client.set(key, JSON.stringify(value), 'EX', ttlSec));
+}
+
+async function cacheDel(...keys) {
+  return withClient(() => client.del(...keys));
 }
 
 async function cacheDelPattern(pattern) {
-  try {
-    if (!(await ensureConnected())) return;
-    const keys = await client.keys(pattern);
-    if (keys && keys.length) await client.del(...keys);
-    scheduleIdleDisconnect();
-  } catch {
-    // ignore — cache is best-effort
-  }
+  return withClient(async () => {
+    let cursor = '0';
+    do {
+      const [next, keys] = await client.scan(cursor, 'MATCH', pattern, 'COUNT', 100);
+      if (keys.length) await client.del(...keys);
+      cursor = next;
+    } while (cursor !== '0');
+  });
 }
 
-module.exports = { redis: client, isRedisUp, cacheGet, cacheSet, cacheDelPattern };
+module.exports = { cacheGet, cacheSet, cacheDel, cacheDelPattern };

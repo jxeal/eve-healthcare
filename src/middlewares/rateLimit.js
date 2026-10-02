@@ -1,6 +1,7 @@
 'use strict';
 
 const rateLimit = require('express-rate-limit');
+const config = require('../config');
 
 function limitExceeded(req, res) {
   return res
@@ -8,32 +9,18 @@ function limitExceeded(req, res) {
     .json({ error: { code: 'RATE_LIMITED', message: 'Too many requests, please try again later' } });
 }
 
-// POST /auth/* — 20 requests / 15 min / IP
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: limitExceeded,
+const limiter = (options) =>
+  rateLimit({ standardHeaders: true, legacyHeaders: false, handler: limitExceeded, ...options });
+
+const authLimiter = limiter({ windowMs: 15 * 60 * 1000, max: config.rateLimit.authMax });
+
+// Mounted after auth, so limits are per user rather than per IP.
+const paymentsLimiter = limiter({
+  windowMs: 60 * 1000,
+  max: config.rateLimit.paymentsMax,
+  keyGenerator: (req) => req.user.id,
 });
 
-// POST /payments — 30 requests / min / user (fall back to IP pre-auth edge)
-const paymentsLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => (req.user && req.user.id ? req.user.id : req.ip),
-  handler: limitExceeded,
-});
-
-// POST /payments/webhook — 100 requests / min / IP
-const webhookLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  handler: limitExceeded,
-});
+const webhookLimiter = limiter({ windowMs: 60 * 1000, max: config.rateLimit.webhookMax });
 
 module.exports = { authLimiter, paymentsLimiter, webhookLimiter };

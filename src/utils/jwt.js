@@ -11,4 +11,4 @@ function verify(token) {
   return jwt.verify(token, config.jwtSecret);
 }
 
-module.exports = { sign, verify, signToken: sign, verifyToken: verify };
+module.exports = { sign, verify };

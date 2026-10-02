@@ -1,12 +1,10 @@
 'use strict';
 
-// PrismaClient singleton (safe across jest module reloads via global cache).
 const { PrismaClient } = require('@prisma/client');
 
+// Cached on global so jest's per-file module registry reuses one client.
 if (!global.__evePrisma) {
   global.__evePrisma = new PrismaClient();
 }
 
-const prisma = global.__evePrisma;
-
-module.exports = { prisma };
+module.exports = { prisma: global.__evePrisma };
