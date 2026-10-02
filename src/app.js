@@ -7,26 +7,19 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./docs/swagger');
 const requestLogger = require('./middlewares/requestLogger');
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
-
-function pick(mod, named) {
-  if (!mod) return null;
-  if (typeof mod === 'function') return mod;
-  if (mod[named] && typeof mod[named] === 'function') return mod[named];
-  return mod;
-}
-
-const authRoutes = pick(require('./modules/auth/auth.routes'), 'authRoutes');
-const centresRoutes = pick(require('./modules/centres/centres.routes'), 'centresRoutes');
-const catalogRoutes = pick(require('./modules/tests-catalog/catalog.routes'), 'catalogRoutes');
-const bookingsRoutes = pick(require('./modules/bookings/bookings.routes'), 'bookingsRoutes');
-const paymentsRoutes = pick(require('./modules/payments/payments.routes'), 'paymentsRoutes');
+const authRoutes = require('./modules/auth/auth.routes');
+const centresRoutes = require('./modules/centres/centres.routes');
+const catalogRoutes = require('./modules/tests-catalog/catalog.routes');
+const bookingsRoutes = require('./modules/bookings/bookings.routes');
+const paymentsRoutes = require('./modules/payments/payments.routes');
 
 const app = express();
 
 // CSP disabled so the bundled Swagger UI (inline scripts/styles) renders.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
-app.use(express.json());
+// The webhook signature is computed over the exact bytes received, so keep them.
+app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); } }));
 app.use(requestLogger);
 
 app.get('/health', (req, res) => res.status(200).json({ ok: true }));
@@ -43,8 +36,4 @@ app.use('/api/v1/payments', paymentsRoutes);
 app.use(notFound);
 app.use(errorHandler);
 
-function createApp() {
-  return app;
-}
-
-module.exports = { app, createApp };
+module.exports = { app };

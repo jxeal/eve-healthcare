@@ -8,10 +8,10 @@ const options = {
     info: {
       title: 'EVE Healthcare API',
       version: '1.0.0',
-      description:
-        'Diagnostic test bookings with simulated payments and an idempotent provider webhook.',
+      description: 'Diagnostic test bookings with simulated payments and a signed, idempotent provider webhook.',
     },
     servers: [{ url: '/api/v1', description: 'Versioned API' }],
+    tags: [{ name: 'Auth' }, { name: 'Centres' }, { name: 'Bookings' }, { name: 'Payments' }],
     components: {
       securitySchemes: {
         bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
@@ -30,22 +30,40 @@ const options = {
             },
           },
         },
+        CentreInput: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', minLength: 2 },
+            location: { type: 'string', minLength: 2 },
+            address: { type: 'string' },
+            phone: { type: 'string' },
+          },
+        },
+        DiagnosticTestInput: {
+          type: 'object',
+          properties: {
+            name: { type: 'string' },
+            price: { type: 'number', exclusiveMinimum: 0 },
+            description: { type: 'string' },
+            isActive: { type: 'boolean' },
+          },
+        },
         Payment: {
           type: 'object',
           properties: {
             id: { type: 'string', format: 'uuid' },
             bookingId: { type: 'string', format: 'uuid' },
             amount: { type: 'string', example: '999.00' },
-            status: { type: 'string', enum: ['PENDING', 'SUCCESS', 'FAILED'] },
-            providerTxnId: { type: 'string', format: 'uuid' },
-            idempotencyKey: { type: 'string', nullable: true },
+            status: { type: 'string', enum: ['PENDING', 'SUCCESS', 'FAILED', 'REFUNDED'] },
+            providerTxnId: { type: 'string', nullable: true },
             createdAt: { type: 'string', format: 'date-time' },
+            updatedAt: { type: 'string', format: 'date-time' },
           },
         },
       },
     },
   },
-  apis: ['./src/modules/**/*.js', './src/docs/*.js'],
+  apis: ['./src/modules/**/*.routes.js'],
 };
 
 module.exports = swaggerJSDoc(options);
