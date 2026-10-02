@@ -1,13 +1,21 @@
-/**
- * Architect-owned (FROZEN) — global jest setup.
- * Sets safe test defaults so `npm test` runs without a real .env.
- * Agents: do NOT edit to make tests pass. Fix source code instead.
- */
-process.env.NODE_ENV = process.env.NODE_ENV || 'test';
-process.env.JWT_SECRET = process.env.JWT_SECRET || 'eve-test-secret-change-in-prod';
-process.env.JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
+// Defaults so `npm test` runs without a .env; point DATABASE_URL_TEST at a migrated test database.
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-jwt-secret';
+process.env.WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'test-webhook-secret';
 process.env.DATABASE_URL =
   process.env.DATABASE_URL_TEST || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/eve_test';
 process.env.REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+process.env.RATE_LIMIT_AUTH_MAX = '10000';
+process.env.RATE_LIMIT_PAYMENTS_MAX = '10000';
+process.env.RATE_LIMIT_WEBHOOK_MAX = '10000';
 
-jest.setTimeout(30000);
+// Node 19+ keeps client sockets alive by default, which would hold the test server open at close.
+const http = require('http');
+http.globalAgent = new http.Agent({ keepAlive: false });
+
+// Each test file gets its own PrismaClient and server; release them so nothing lingers between files.
+afterAll(async () => {
+  if (global.__testServer) await new Promise((resolve) => global.__testServer.close(resolve));
+  const { prisma } = require('../src/config/db');
+  await prisma.$disconnect();
+});

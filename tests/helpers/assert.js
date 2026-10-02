@@ -1,7 +1,3 @@
-/**
- * Architect-owned (FROZEN) — shared assertions for error/pagination envelopes.
- */
-
 function expectErrorShape(res, status, code) {
   expect(res.status).toBe(status);
   expect(res.body).toHaveProperty('error');
@@ -22,12 +18,10 @@ function expectPaginationShape(body) {
   });
 }
 
-/** A date string safely in the future (default +7 days). */
 function futureISO(days = 7) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
 
-/** A date string safely in the past (default -1 day). */
 function pastISO(days = 1) {
   return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 }

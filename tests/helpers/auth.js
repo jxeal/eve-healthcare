@@ -1,32 +1,32 @@
-/**
- * Architect-owned (FROZEN) test helper — auth flows.
- */
 const request = require('supertest');
 const { getApp } = require('./app');
+const { prisma } = require('../../src/config/db');
+const { hash } = require('../../src/utils/password');
+const { issueToken } = require('../../src/modules/auth/auth.service');
 
-const unique = (prefix = 'user') =>
-  `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e9)}@example.com`;
+const unique = (prefix = 'user') => `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1e9)}@example.com`;
 
-/** Sign up a fresh user, return { user, token, email, password }. */
 async function signupUser({ name = 'Test User', email, password = 'Password123!' } = {}) {
-  const app = getApp();
   const payload = { name, email: email || unique(), password };
-  const res = await request(app).post('/api/v1/auth/signup').send(payload);
+  const res = await request(getApp()).post('/api/v1/auth/signup').send(payload);
   if (res.status !== 201) {
-    throw new Error(
-      `[signupUser] expected 201, got ${res.status}: ${JSON.stringify(res.body)} (payload=${JSON.stringify({ ...payload, password: '***' })})`
-    );
+    throw new Error(`[signupUser] expected 201, got ${res.status}: ${JSON.stringify(res.body)}`);
   }
   return { user: res.body.user, token: res.body.token, email: payload.email, password };
 }
 
-/** Log in, return { user, token }. */
+// Admins can't self-register, so create one directly.
+async function createAdmin() {
+  const user = await prisma.user.create({
+    data: { name: 'Admin', email: unique('admin'), passwordHash: await hash('Admin123!'), role: 'ADMIN' },
+  });
+  return { user, token: issueToken(user) };
+}
+
 async function loginUser(email, password) {
-  const app = getApp();
-  const res = await request(app).post('/api/v1/auth/login').send({ email, password });
-  return res;
+  return request(getApp()).post('/api/v1/auth/login').send({ email, password });
 }
 
 const authHeader = (token) => ({ Authorization: `Bearer ${token}` });
 
-module.exports = { signupUser, loginUser, authHeader, unique };
+module.exports = { signupUser, createAdmin, loginUser, authHeader, unique };

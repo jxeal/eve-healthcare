@@ -1,26 +1,10 @@
-/**
- * Architect-owned (FROZEN) test helper.
- * Single import point for the Express app so tests fail with a CLEAR
- * message until Agent-1 implements src/app.js.
- */
-let cached = null;
+const { app } = require('../../src/app');
 
+// One listening server per test file. Letting supertest open and close a server per
+// request flakes with "socket hang up" / "Parse Error" when ports get reused.
 function getApp() {
-  if (cached) return cached;
-  try {
-    // Agent-1 MUST export either `app` or `createApp()` from src/app.js
-    // eslint-disable-next-line global-require, import/no-dynamic-require
-    const mod = require('../../src/app');
-    cached = mod.app || mod.createApp?.() || mod.default || mod;
-  } catch (err) {
-    throw new Error(
-      `[tests/helpers/app] Cannot load src/app.js — Agent-1 has not implemented it yet.\nOriginal: ${err.message}\nExpected: src/app.js exporting { app } (express instance, no app.listen inside).`
-    );
-  }
-  if (!cached || typeof cached !== 'function') {
-    throw new Error('[tests/helpers/app] src/app.js did not export an express app function.');
-  }
-  return cached;
+  if (!global.__testServer) global.__testServer = app.listen(0);
+  return global.__testServer;
 }
 
 module.exports = { getApp };

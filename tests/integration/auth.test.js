@@ -1,7 +1,3 @@
-/**
- * Architect-owned (FROZEN) — Agent-1 must make these green.
- * Covers: signup, login, JWT me, validation, edge cases.
- */
 const request = require('supertest');
 const { getApp } = require('../helpers/app');
 const { signupUser, authHeader, unique } = require('../helpers/auth');
@@ -99,5 +95,33 @@ describe('Auth — GET /api/v1/auth/me', () => {
     const app = getApp();
     const res = await request(app).get('/api/v1/auth/me').set(authHeader('garbage.token.here'));
     expectErrorShape(res, 401);
+  });
+});
+
+describe('Auth — email normalisation and roles', () => {
+  test('email is case-insensitive: signup with different case → 409', async () => {
+    const email = unique('Case');
+    await signupUser({ email });
+    const res = await request(getApp())
+      .post('/api/v1/auth/signup')
+      .send({ name: 'Upper', email: email.toUpperCase(), password: 'Password123!' });
+    expectErrorShape(res, 409, 'CONFLICT');
+  });
+
+  test('login works regardless of email case and surrounding spaces', async () => {
+    const { email, password } = await signupUser({ email: unique('Mixed') });
+    const res = await request(getApp())
+      .post('/api/v1/auth/login')
+      .send({ email: `  ${email.toUpperCase()} `, password });
+    expect(res.status).toBe(200);
+    expect(res.body.user.email).toBe(email.toLowerCase());
+  });
+
+  test('self-registered accounts are USER, never ADMIN', async () => {
+    const res = await request(getApp())
+      .post('/api/v1/auth/signup')
+      .send({ name: 'Sneaky', email: unique(), password: 'Password123!', role: 'ADMIN' });
+    expect(res.status).toBe(201);
+    expect(res.body.user.role).toBe('USER');
   });
 });

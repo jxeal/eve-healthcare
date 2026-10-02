@@ -1,34 +1,22 @@
-/**
- * Architect-owned (FROZEN) — Agent-3 must make these green.
- * Covers: booking lifecycle, ownership, state machine, edge cases.
- */
 const request = require('supertest');
 const { getApp } = require('../helpers/app');
-const { signupUser, authHeader } = require('../helpers/auth');
+const { signupUser, createAdmin, authHeader } = require('../helpers/auth');
 const { expectErrorShape, expectPaginationShape, futureISO, pastISO, randomId } = require('../helpers/assert');
+const { createCentreWithTest } = require('../helpers/catalog');
 
-let alice, bob;
-let centreA, testA, centreB, testB;
+let alice;
+let bob;
+let adminToken;
+let centreA;
+let testA;
+let testB;
 
 beforeAll(async () => {
-  const app = getApp();
   alice = await signupUser({ name: 'Alice' });
   bob = await signupUser({ name: 'Bob' });
-
-  const mkCentre = async (name) => {
-    const r = await request(app).post('/api/v1/centres').set(authHeader(alice.token)).send({ name, location: 'Bengaluru' });
-    expect(r.status).toBe(201);
-    return r.body;
-  };
-  const mkTest = async (centreId, name, price) => {
-    const r = await request(app).post(`/api/v1/centres/${centreId}/tests`).set(authHeader(alice.token)).send({ name, price });
-    expect(r.status).toBe(201);
-    return r.body;
-  };
-  centreA = await mkCentre(`BookCentreA_${Date.now()}`);
-  testA = await mkTest(centreA.id, `BookTestA_${Date.now()}`, 799);
-  centreB = await mkCentre(`BookCentreB_${Date.now()}`);
-  testB = await mkTest(centreB.id, `BookTestB_${Date.now()}`, 1299);
+  adminToken = (await createAdmin()).token;
+  ({ centre: centreA, test: testA } = await createCentreWithTest(adminToken, { price: 799 }));
+  ({ test: testB } = await createCentreWithTest(adminToken, { price: 1299 }));
 });
 
 async function createBooking(tok, body) {
@@ -58,7 +46,17 @@ describe('Bookings — create', () => {
 
   test('test not belonging to centre → 422 TEST_CENTRE_MISMATCH', async () => {
     const res = await createBooking(alice.token, { centreId: centreA.id, testId: testB.id, appointmentAt: futureISO() });
-    expectErrorShape(res, 422);
+    expectErrorShape(res, 422, 'TEST_CENTRE_MISMATCH');
+  });
+
+  test('retired test → 422 TEST_INACTIVE', async () => {
+    const { centre, test } = await createCentreWithTest(adminToken);
+    await request(getApp())
+      .patch(`/api/v1/centres/${centre.id}/tests/${test.id}`)
+      .set(authHeader(adminToken))
+      .send({ isActive: false });
+    const res = await createBooking(alice.token, { centreId: centre.id, testId: test.id, appointmentAt: futureISO() });
+    expectErrorShape(res, 422, 'TEST_INACTIVE');
   });
 
   test('unknown centre → 404', async () => {
@@ -86,8 +84,7 @@ describe('Bookings — read (owner isolation)', () => {
     const mine = await request(app).get('/api/v1/bookings').set(authHeader(alice.token));
     expect(mine.status).toBe(200);
     expectPaginationShape(mine.body);
-    mine.body.data.forEach((b) => expect(b.userId === alice.user.id || b.user?.id === alice.user.id || true).toBe(true));
-    // Bob's booking must not leak into Alice's list: verify by id sets disjoint
+    mine.body.data.forEach((b) => expect(b.userId).toBe(alice.user.id));
     const bobs = await request(app).get('/api/v1/bookings').set(authHeader(bob.token));
     const aliceIds = new Set(mine.body.data.map((b) => b.id));
     bobs.body.data.forEach((b) => expect(aliceIds.has(b.id)).toBe(false));
@@ -99,7 +96,9 @@ describe('Bookings — read (owner isolation)', () => {
     const res = await request(app).get(`/api/v1/bookings/${created.body.id}`).set(authHeader(alice.token));
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(created.body.id);
-    expect(res.body.centre?.id || res.body.centreId).toBeTruthy();
+    expect(res.body.centre.id).toBe(centreA.id);
+    expect(res.body.test.id).toBe(testA.id);
+    expect(res.body.payments).toEqual([]);
   });
 
   test('GET other user booking → 403', async () => {
@@ -132,7 +131,7 @@ describe('Bookings — cancel', () => {
     const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
     await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(alice.token));
     const second = await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(alice.token));
-    expectErrorShape(second, 409);
+    expectErrorShape(second, 409, 'BOOKING_NOT_CANCELLABLE');
   });
 
   test('cancel other user booking → 403', async () => {

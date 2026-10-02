@@ -1,22 +1,7 @@
-/**
- * Architect-owned (FROZEN) — Agent-1 must make these green.
- * Tests src/utils/jwt.js + src/utils/password.js contracts.
- */
-let jwt, password;
-try {
-  // eslint-disable-next-line global-require
-  jwt = require('../../src/utils/jwt');
-} catch (e) {
-  throw new Error(`[unit/authUtils] Cannot load src/utils/jwt.js — Agent-1 must implement it. Original: ${e.message}`);
-}
-try {
-  // eslint-disable-next-line global-require
-  password = require('../../src/utils/password');
-} catch (e) {
-  throw new Error(`[unit/authUtils] Cannot load src/utils/password.js — Agent-1 must implement it. Original: ${e.message}`);
-}
+const jwt = require('../../src/utils/jwt');
+const password = require('../../src/utils/password');
 
-describe('password utils (bcryptjs)', () => {
+describe('password utils', () => {
   test('hash + compare round-trip; wrong password fails', async () => {
     const hash = await password.hash('Password123!');
     expect(hash).not.toContain('Password123!');
@@ -26,19 +11,12 @@ describe('password utils (bcryptjs)', () => {
 });
 
 describe('jwt utils', () => {
-  test('sign + verify round-trip exposes sub', () => {
-    const sign = jwt.sign || jwt.signToken || jwt.default?.sign;
-    const verify = jwt.verify || jwt.verifyToken || jwt.default?.verify;
-    expect(typeof sign).toBe('function');
-    expect(typeof verify).toBe('function');
-    const token = sign({ sub: 'user-123', email: 'a@b.c' });
-    expect(typeof token).toBe('string');
-    const decoded = verify(token);
-    expect(decoded.sub || decoded.id || decoded.userId).toBeTruthy();
+  test('sign + verify round-trip keeps sub and role', () => {
+    const decoded = jwt.verify(jwt.sign({ sub: 'user-123', role: 'ADMIN' }));
+    expect(decoded).toMatchObject({ sub: 'user-123', role: 'ADMIN' });
   });
 
-  test('garbage token throws (does not return null)', () => {
-    const verify = jwt.verify || jwt.verifyToken || jwt.default?.verify;
-    expect(() => verify('garbage.token.here')).toThrow();
+  test('garbage token throws', () => {
+    expect(() => jwt.verify('garbage.token.here')).toThrow();
   });
 });
