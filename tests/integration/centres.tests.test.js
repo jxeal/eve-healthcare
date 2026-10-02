@@ -74,7 +74,10 @@ describe('Centres — writes', () => {
   test('PATCH /centres/:id: user → 403, missing → 404, empty body → 422', async () => {
     const app = getApp();
     const created = await createCentre();
-    const asUser = await request(app).patch(`/api/v1/centres/${created.body.id}`).set(authHeader(userToken)).send({ location: 'X1' });
+    const asUser = await request(app)
+      .patch(`/api/v1/centres/${created.body.id}`)
+      .set(authHeader(userToken))
+      .send({ location: 'X1' });
     expectErrorShape(asUser, 403);
     const missing = await request(app)
       .patch('/api/v1/centres/00000000-0000-4000-8000-000000000000')
@@ -139,7 +142,9 @@ describe('Diagnostic tests catalogue', () => {
 
   test('POST test without auth → 401; as user → 403', async () => {
     const centre = await createCentre();
-    const anon = await request(getApp()).post(`/api/v1/centres/${centre.body.id}/tests`).send({ name: 'X', price: 100 });
+    const anon = await request(getApp())
+      .post(`/api/v1/centres/${centre.body.id}/tests`)
+      .send({ name: 'X', price: 100 });
     expectErrorShape(anon, 401);
     expectErrorShape(await createTest(centre.body.id, {}, userToken), 403);
   });
@@ -157,7 +162,7 @@ describe('Diagnostic tests catalogue', () => {
   test('the database rejects a non-positive price even without the API', async () => {
     const centre = await createCentre();
     await expect(
-      prisma.diagnosticTest.create({ data: { centreId: centre.body.id, name: tag('Free'), price: 0 } })
+      prisma.diagnosticTest.create({ data: { centreId: centre.body.id, name: tag('Free'), price: 0 } }),
     ).rejects.toThrow(/DiagnosticTest_price_positive/);
   });
 

@@ -12,7 +12,10 @@ describe('password utils', () => {
 
 describe('jwt utils', () => {
   test('sign + verify round-trip keeps the subject', () => {
-    expect(jwt.verify(jwt.sign({ sub: 'user-123', email: 'a@b.c' }))).toMatchObject({ sub: 'user-123', email: 'a@b.c' });
+    expect(jwt.verify(jwt.sign({ sub: 'user-123', email: 'a@b.c' }))).toMatchObject({
+      sub: 'user-123',
+      email: 'a@b.c',
+    });
   });
 
   test('garbage token throws', () => {

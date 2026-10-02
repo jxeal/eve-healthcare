@@ -33,7 +33,7 @@ const createPayment = asyncHandler(async (req, res) => {
 });
 
 const getPaymentById = asyncHandler(async (req, res) =>
-  res.status(200).json(await service.getPaymentById(req.user.id, req.params.id))
+  res.status(200).json(await service.getPaymentById(req.user.id, req.params.id)),
 );
 
 const webhook = asyncHandler(async (req, res) => {

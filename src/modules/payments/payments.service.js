@@ -13,7 +13,6 @@ const SETTLE_RETRY_MS = 100;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-
 // Inserts a PENDING attempt under the booking lock *before* charging, so concurrent
 // requests can never reach the gateway twice for one booking.
 async function claimAttempt(userId, bookingId, keyHash) {

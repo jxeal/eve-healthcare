@@ -58,7 +58,7 @@ async function scheduleReconciliation() {
   await getQueue().upsertJobScheduler(
     JOBS.RECONCILE,
     { every: config.reconcile.intervalSec * 1000 },
-    { name: JOBS.RECONCILE, opts: { attempts: 1 } }
+    { name: JOBS.RECONCILE, opts: { attempts: 1 } },
   );
 }
 

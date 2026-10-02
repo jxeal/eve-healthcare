@@ -16,16 +16,20 @@ function loadConfig(env) {
 
 describe('config secrets', () => {
   test('production refuses to start without JWT_SECRET', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: undefined, WEBHOOK_SECRET: 'w'.repeat(32) })).toThrow(/JWT_SECRET/);
+    expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: undefined, WEBHOOK_SECRET: 'w'.repeat(32) })).toThrow(
+      /JWT_SECRET/,
+    );
   });
 
   test('production refuses to start without WEBHOOK_SECRET', () => {
-    expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'j'.repeat(32), WEBHOOK_SECRET: undefined })).toThrow(/WEBHOOK_SECRET/);
+    expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'j'.repeat(32), WEBHOOK_SECRET: undefined })).toThrow(
+      /WEBHOOK_SECRET/,
+    );
   });
 
   test('production rejects secrets shorter than 32 characters', () => {
     expect(() => loadConfig({ NODE_ENV: 'production', JWT_SECRET: 'short', WEBHOOK_SECRET: 'w'.repeat(32) })).toThrow(
-      /JWT_SECRET must be at least 32/
+      /JWT_SECRET must be at least 32/,
     );
   });
 

@@ -16,7 +16,12 @@ async function forEachRow(model, where, sortField, idField, handle) {
   let last = null;
   for (;;) {
     const after = last
-      ? { OR: [{ [sortField]: { gt: last[sortField] } }, { [sortField]: last[sortField], [idField]: { gt: last[idField] } }] }
+      ? {
+          OR: [
+            { [sortField]: { gt: last[sortField] } },
+            { [sortField]: last[sortField], [idField]: { gt: last[idField] } },
+          ],
+        }
       : {};
     const rows = await prisma[model].findMany({
       where: { AND: [where, after] },
@@ -71,10 +76,25 @@ function tally(counts, handle) {
 async function runReconciliation({ now = new Date() } = {}) {
   const summary = { payments: {}, webhookEvents: {} };
   const stalePayments = { status: 'PENDING', createdAt: { lt: secondsBefore(now, config.reconcile.staleAfterSec) } };
-  await forEachRow('payment', stalePayments, 'createdAt', 'id', tally(summary.payments, (p) => reconcilePayment(p, now)));
+  await forEachRow(
+    'payment',
+    stalePayments,
+    'createdAt',
+    'id',
+    tally(summary.payments, (p) => reconcilePayment(p, now)),
+  );
 
-  const staleEvents = { processedAt: null, receivedAt: { lt: secondsBefore(now, config.reconcile.webhookRetryAfterSec) } };
-  await forEachRow('webhookEvent', staleEvents, 'receivedAt', 'eventId', tally(summary.webhookEvents, retryWebhookEvent));
+  const staleEvents = {
+    processedAt: null,
+    receivedAt: { lt: secondsBefore(now, config.reconcile.webhookRetryAfterSec) },
+  };
+  await forEachRow(
+    'webhookEvent',
+    staleEvents,
+    'receivedAt',
+    'eventId',
+    tally(summary.webhookEvents, retryWebhookEvent),
+  );
 
   if (Object.keys(summary.payments).length || Object.keys(summary.webhookEvents).length) {
     logger.info({ event: 'reconciliation.done', ...summary });

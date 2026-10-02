@@ -36,12 +36,24 @@ test('SIGTERM lets an in-flight payment finish before the process exits', async 
   const base = `http://localhost:${port}`;
   child = spawn(process.execPath, ['src/server.js'], { cwd: ROOT, env: { ...process.env, PORT: String(port) } });
   const exitCode = new Promise((resolve) => child.once('exit', resolve));
-  await waitFor(async () => (await request(base).get('/health').catch(() => ({}))).status === 200);
+  await waitFor(
+    async () =>
+      (
+        await request(base)
+          .get('/health')
+          .catch(() => ({}))
+      ).status === 200,
+  );
 
   const { token: adminToken } = await createAdmin();
-  const signup = await request(base).post('/api/v1/auth/signup').send({ name: 'S', email: unique(), password: 'Password123!' });
+  const signup = await request(base)
+    .post('/api/v1/auth/signup')
+    .send({ name: 'S', email: unique(), password: 'Password123!' });
   const userAuth = authHeader(signup.body.token);
-  const centre = await request(base).post('/api/v1/centres').set(authHeader(adminToken)).send({ name: `Shutdown_${Date.now()}`, location: 'Pune' });
+  const centre = await request(base)
+    .post('/api/v1/centres')
+    .set(authHeader(adminToken))
+    .send({ name: `Shutdown_${Date.now()}`, location: 'Pune' });
   const diagTest = await request(base)
     .post(`/api/v1/centres/${centre.body.id}/tests`)
     .set(authHeader(adminToken))
@@ -64,5 +76,7 @@ test('SIGTERM lets an in-flight payment finish before the process exits', async 
   expect(res.status).toBe(201);
   expect(res.body.status).toBe('SUCCESS');
   expect(await exitCode).toBe(0);
-  expect(await prisma.payment.findFirst({ where: { bookingId: booking.body.id } })).toMatchObject({ status: 'SUCCESS' });
+  expect(await prisma.payment.findFirst({ where: { bookingId: booking.body.id } })).toMatchObject({
+    status: 'SUCCESS',
+  });
 });

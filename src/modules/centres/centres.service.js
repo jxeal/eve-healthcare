@@ -15,8 +15,7 @@ const keys = {
 };
 
 const centreNotFound = () => new ApiError(404, 'NOT_FOUND', 'Centre not found');
-const duplicateTestName = () =>
-  new ApiError(409, 'CONFLICT', 'A test with this name already exists in the centre');
+const duplicateTestName = () => new ApiError(409, 'CONFLICT', 'A test with this name already exists in the centre');
 
 async function listCentres(query = {}) {
   const { page, limit, skip, take } = parsePagination(query);

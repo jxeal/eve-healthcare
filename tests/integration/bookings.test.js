@@ -26,7 +26,11 @@ async function createBooking(tok, body) {
 
 describe('Bookings — create', () => {
   test('creates PENDING booking with amount snapshot from test price', async () => {
-    const res = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const res = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     expect(res.status).toBe(201);
     expect(res.body.status).toBe('PENDING');
     expect(Number(res.body.amount)).toBeCloseTo(Number(testA.price));
@@ -35,7 +39,9 @@ describe('Bookings — create', () => {
 
   test('no token → 401', async () => {
     const app = getApp();
-    const res = await request(app).post('/api/v1/bookings').send({ centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const res = await request(app)
+      .post('/api/v1/bookings')
+      .send({ centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
     expectErrorShape(res, 401);
   });
 
@@ -45,7 +51,11 @@ describe('Bookings — create', () => {
   });
 
   test('test not belonging to centre → 422 TEST_CENTRE_MISMATCH', async () => {
-    const res = await createBooking(alice.token, { centreId: centreA.id, testId: testB.id, appointmentAt: futureISO() });
+    const res = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testB.id,
+      appointmentAt: futureISO(),
+    });
     expectErrorShape(res, 422, 'TEST_CENTRE_MISMATCH');
   });
 
@@ -60,12 +70,20 @@ describe('Bookings — create', () => {
   });
 
   test('unknown centre → 404', async () => {
-    const res = await createBooking(alice.token, { centreId: randomId(), testId: testA.id, appointmentAt: futureISO() });
+    const res = await createBooking(alice.token, {
+      centreId: randomId(),
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     expect(res.status).toBe(404);
   });
 
   test('unknown test → 404', async () => {
-    const res = await createBooking(alice.token, { centreId: centreA.id, testId: randomId(), appointmentAt: futureISO() });
+    const res = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: randomId(),
+      appointmentAt: futureISO(),
+    });
     expect(res.status).toBe(404);
   });
 
@@ -92,7 +110,11 @@ describe('Bookings — read (owner isolation)', () => {
 
   test('GET /bookings/:id owner → 200 with nested centre/test', async () => {
     const app = getApp();
-    const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const created = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     const res = await request(app).get(`/api/v1/bookings/${created.body.id}`).set(authHeader(alice.token));
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(created.body.id);
@@ -103,7 +125,11 @@ describe('Bookings — read (owner isolation)', () => {
 
   test('GET other user booking → 403', async () => {
     const app = getApp();
-    const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const created = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     const res = await request(app).get(`/api/v1/bookings/${created.body.id}`).set(authHeader(bob.token));
     expectErrorShape(res, 403);
   });
@@ -120,7 +146,11 @@ describe('Bookings — read (owner isolation)', () => {
 describe('Bookings — cancel', () => {
   test('owner can cancel PENDING → CANCELLED', async () => {
     const app = getApp();
-    const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const created = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     const res = await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(alice.token));
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('CANCELLED');
@@ -128,7 +158,11 @@ describe('Bookings — cancel', () => {
 
   test('double cancel → 409', async () => {
     const app = getApp();
-    const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const created = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(alice.token));
     const second = await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(alice.token));
     expectErrorShape(second, 409, 'BOOKING_NOT_CANCELLABLE');
@@ -136,7 +170,11 @@ describe('Bookings — cancel', () => {
 
   test('cancel other user booking → 403', async () => {
     const app = getApp();
-    const created = await createBooking(alice.token, { centreId: centreA.id, testId: testA.id, appointmentAt: futureISO() });
+    const created = await createBooking(alice.token, {
+      centreId: centreA.id,
+      testId: testA.id,
+      appointmentAt: futureISO(),
+    });
     const res = await request(app).post(`/api/v1/bookings/${created.body.id}/cancel`).set(authHeader(bob.token));
     expectErrorShape(res, 403);
   });

@@ -19,7 +19,14 @@ const app = express();
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(cors());
 // The webhook signature is computed over the exact bytes received, so keep them.
-app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf.toString('utf8'); } }));
+app.use(
+  express.json({
+    limit: '100kb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    },
+  }),
+);
 app.use(requestLogger);
 
 app.get('/health', (req, res) => res.status(200).json({ ok: true }));

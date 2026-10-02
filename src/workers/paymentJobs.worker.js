@@ -33,7 +33,7 @@ function startWorker() {
   worker = new Worker(QUEUE_NAME, processor, { connection: createQueueConnection(), concurrency: 5 });
   worker.on('completed', (job) => logger.debug({ event: 'worker.completed', job: job.name, id: job.id }));
   worker.on('failed', (job, err) =>
-    logger.warn({ event: 'worker.failed', job: job && job.name, attempts: job && job.attemptsMade, err: err.message })
+    logger.warn({ event: 'worker.failed', job: job && job.name, attempts: job && job.attemptsMade, err: err.message }),
   );
   worker.on('error', (err) => logger.warn({ event: 'worker.error', err: err.message }));
   scheduleReconciliation().catch((err) => logger.warn({ event: 'worker.schedule_failed', err: err.message }));

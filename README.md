@@ -27,6 +27,8 @@ The suite needs Postgres and Redis. It uses its own database so it never touches
 createdb eve_test
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/eve_test npx prisma migrate deploy
 npm test                              # or DATABASE_URL_TEST=... npm test for another database
+npm run lint                          # ESLint
+npm run format:check                  # Prettier (npm run format fixes it)
 ```
 
 ### Docker
@@ -229,4 +231,4 @@ the signal.
 - Appointment slots with capacity per centre, so two people can't book the last slot.
 - Money in integer minor units with a currency column.
 - Request ids carried through logs, plus Prometheus metrics for queue depth and webhook latency.
-- A real ESLint config in CI.
+- Run lint, the format check and the tests in CI (GitHub Actions with Postgres and Redis services).

@@ -57,7 +57,8 @@ async function main() {
   console.log(`admin: ${ADMIN_EMAIL}`);
 
   for (const { tests, ...data } of CENTRES) {
-    const centre = (await prisma.centre.findFirst({ where: { name: data.name } })) || (await prisma.centre.create({ data }));
+    const centre =
+      (await prisma.centre.findFirst({ where: { name: data.name } })) || (await prisma.centre.create({ data }));
     for (const test of tests) {
       await prisma.diagnosticTest.upsert({
         where: { centreId_name: { centreId: centre.id, name: test.name } },

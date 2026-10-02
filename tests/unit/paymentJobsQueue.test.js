@@ -35,7 +35,7 @@ describe('payment jobs queue', () => {
     expect(upsertJobScheduler).toHaveBeenCalledWith(
       'reconcile-payments',
       { every: 60000 },
-      expect.objectContaining({ name: 'reconcile-payments' })
+      expect.objectContaining({ name: 'reconcile-payments' }),
     );
   });
 });

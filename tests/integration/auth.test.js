@@ -30,13 +30,17 @@ describe('Auth — POST /api/v1/auth/signup', () => {
 
   test('invalid email → 422 VALIDATION_ERROR', async () => {
     const app = getApp();
-    const res = await request(app).post('/api/v1/auth/signup').send({ name: 'Bad', email: 'not-an-email', password: 'Password123!' });
+    const res = await request(app)
+      .post('/api/v1/auth/signup')
+      .send({ name: 'Bad', email: 'not-an-email', password: 'Password123!' });
     expectErrorShape(res, 422);
   });
 
   test('short password (<6) → 422', async () => {
     const app = getApp();
-    const res = await request(app).post('/api/v1/auth/signup').send({ name: 'Short', email: unique(), password: '123' });
+    const res = await request(app)
+      .post('/api/v1/auth/signup')
+      .send({ name: 'Short', email: unique(), password: '123' });
     expectErrorShape(res, 422);
   });
 
@@ -121,7 +125,7 @@ describe('Auth — email normalisation and roles', () => {
   test('the database itself rejects an email differing only in case', async () => {
     const { email } = await signupUser();
     await expect(
-      prisma.user.create({ data: { name: 'Dup', email: email.toUpperCase(), passwordHash: 'x' } })
+      prisma.user.create({ data: { name: 'Dup', email: email.toUpperCase(), passwordHash: 'x' } }),
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 

@@ -161,7 +161,10 @@ describe('Idempotency-Key', () => {
   test('concurrent requests with one key produce one payment', async () => {
     const booking = await makeBooking();
     const key = idemKey();
-    const [r1, r2] = await Promise.all([pay(booking.id, { simulate: 'SUCCESS', key }), pay(booking.id, { simulate: 'SUCCESS', key })]);
+    const [r1, r2] = await Promise.all([
+      pay(booking.id, { simulate: 'SUCCESS', key }),
+      pay(booking.id, { simulate: 'SUCCESS', key }),
+    ]);
     expect([r1.status, r2.status].sort()).toEqual([200, 201]);
     expect(r1.body.id).toBe(r2.body.id);
   });
@@ -190,7 +193,8 @@ describe('Idempotency-Key', () => {
 });
 
 describe('Appointment time', () => {
-  const moveToPast = (id) => prisma.booking.update({ where: { id }, data: { appointmentAt: new Date(Date.now() - 60000) } });
+  const moveToPast = (id) =>
+    prisma.booking.update({ where: { id }, data: { appointmentAt: new Date(Date.now() - 60000) } });
 
   test('paying after the appointment time → 409 APPOINTMENT_PASSED', async () => {
     const booking = await makeBooking();
@@ -268,7 +272,10 @@ describe('Webhook — authenticity', () => {
 
   test('wrong signature → 401', async () => {
     const { payment } = await pendingPayment();
-    const res = await postWebhook({ eventId: eventId(), paymentId: payment.id, status: 'SUCCESS' }, { signature: 'ab'.repeat(32) });
+    const res = await postWebhook(
+      { eventId: eventId(), paymentId: payment.id, status: 'SUCCESS' },
+      { signature: 'ab'.repeat(32) },
+    );
     expectErrorShape(res, 401, 'INVALID_SIGNATURE');
   });
 
@@ -276,7 +283,7 @@ describe('Webhook — authenticity', () => {
     const { payment } = await pendingPayment();
     const res = await postWebhook(
       { eventId: eventId(), paymentId: payment.id, status: 'SUCCESS' },
-      { timestamp: Math.floor(Date.now() / 1000) - 3600 }
+      { timestamp: Math.floor(Date.now() / 1000) - 3600 },
     );
     expectErrorShape(res, 401, 'INVALID_SIGNATURE');
   });
@@ -366,7 +373,12 @@ describe('Webhook — processing', () => {
   test('paymentId and providerTxnId of different payments → 422', async () => {
     const { payment: a } = await pendingPayment();
     const { payment: b } = await pendingPayment();
-    const res = await postWebhook({ eventId: eventId(), paymentId: a.id, providerTxnId: b.providerTxnId, status: 'SUCCESS' });
+    const res = await postWebhook({
+      eventId: eventId(),
+      paymentId: a.id,
+      providerTxnId: b.providerTxnId,
+      status: 'SUCCESS',
+    });
     expectErrorShape(res, 422, 'PAYMENT_REFERENCE_MISMATCH');
   });
 });
