@@ -71,4 +71,8 @@ async function cacheDelPattern(pattern) {
   });
 }
 
-module.exports = { cacheGet, cacheSet, cacheDel, cacheDelPattern };
+function closeCache() {
+  client.disconnect();
+}
+
+module.exports = { cacheGet, cacheSet, cacheDel, cacheDelPattern, closeCache };

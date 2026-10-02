@@ -8,6 +8,11 @@ const bookings = require('../bookings/bookings.service');
 const gateway = require('./mockGateway');
 const { toPublicPayment } = require('./publicPayment');
 
+const SETTLE_ATTEMPTS = 3;
+const SETTLE_RETRY_MS = 100;
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 
 // Inserts a PENDING attempt under the booking lock *before* charging, so concurrent
 // requests can never reach the gateway twice for one booking.
@@ -63,6 +68,28 @@ async function applyPaymentStatus(tx, paymentId, status, providerTxnId) {
   return { payment: updated, applied: true };
 }
 
+async function settlePayment(paymentId, { status, providerTxnId }) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await prisma.$transaction((tx) => applyPaymentStatus(tx, paymentId, status, providerTxnId));
+    } catch (err) {
+      if (attempt === SETTLE_ATTEMPTS) throw err;
+      await delay(SETTLE_RETRY_MS * attempt);
+    }
+  }
+}
+
+// On any failure the attempt stays PENDING and the reconciliation job settles it from the provider's record.
+async function chargeAndSettle(attempt, simulate) {
+  try {
+    const result = await gateway.charge({ reference: attempt.id, simulate });
+    return (await settlePayment(attempt.id, result)).payment;
+  } catch (err) {
+    logger.error({ event: 'payment.settle_deferred', paymentId: attempt.id, err });
+    return attempt;
+  }
+}
+
 async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
   const keyHash = idempotencyKey ? scopedKey(userId, idempotencyKey) : null;
   let claim;
@@ -79,10 +106,7 @@ async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
     return { payment: toPublicPayment(claim.payment), replay: true };
   }
 
-  const result = await gateway.charge({ simulate });
-  const { payment } = await prisma.$transaction((tx) =>
-    applyPaymentStatus(tx, claim.payment.id, result.status, result.providerTxnId)
-  );
+  const payment = await chargeAndSettle(claim.payment, simulate);
   logger.info({ event: 'payment.charged', paymentId: payment.id, bookingId, status: payment.status });
   return { payment: toPublicPayment(payment), replay: false };
 }
@@ -97,4 +121,4 @@ async function getPaymentById(userId, id) {
   return toPublicPayment(payment);
 }
 
-module.exports = { createPayment, getPaymentById, applyPaymentStatus };
+module.exports = { createPayment, getPaymentById, applyPaymentStatus, settlePayment };

@@ -1,12 +1,12 @@
 'use strict';
 
-const crypto = require('crypto');
 const { Queue } = require('bullmq');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { createQueueConnection } = require('./connection');
 
-const QUEUE_NAME = 'webhook-retries';
+const QUEUE_NAME = 'payment-jobs';
+const JOBS = { PROCESS_WEBHOOK_EVENT: 'process-webhook-event', RECONCILE: 'reconcile-payments' };
 const ENQUEUE_TIMEOUT_MS = 2000;
 
 let queue = null;
@@ -28,11 +28,6 @@ function getQueue() {
   return queue;
 }
 
-// BullMQ rejects custom job ids containing ':', which provider event ids may have.
-function jobIdFor(eventId) {
-  return `evt-${crypto.createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
-}
-
 // The connection retries forever while Redis is down, so bound the wait.
 function withTimeout(promise, ms) {
   let timer;
@@ -42,16 +37,14 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
+// No custom job id: BullMQ silently skips an add whose id it still remembers, even a failed one.
 async function enqueueWebhookRetry(eventId) {
   if (config.env === 'test') {
     testJobs.push(eventId);
     return { queued: true };
   }
   try {
-    await withTimeout(
-      getQueue().add('process-webhook-event', { eventId }, { jobId: jobIdFor(eventId) }),
-      ENQUEUE_TIMEOUT_MS
-    );
+    await withTimeout(getQueue().add(JOBS.PROCESS_WEBHOOK_EVENT, { eventId }), ENQUEUE_TIMEOUT_MS);
     logger.info({ event: 'queue.enqueued', eventId });
     return { queued: true };
   } catch (err) {
@@ -60,9 +53,23 @@ async function enqueueWebhookRetry(eventId) {
   }
 }
 
+// Upserting is idempotent, so every API and worker process can call it on boot.
+async function scheduleReconciliation() {
+  await getQueue().upsertJobScheduler(
+    JOBS.RECONCILE,
+    { every: config.reconcile.intervalSec * 1000 },
+    { name: JOBS.RECONCILE, opts: { attempts: 1 } }
+  );
+}
+
+async function closeQueue() {
+  if (queue) await queue.close();
+  queue = null;
+}
+
 // Under NODE_ENV=test nothing reaches Redis; tests inspect what would have been queued.
 function queuedInTests() {
   return testJobs;
 }
 
-module.exports = { QUEUE_NAME, enqueueWebhookRetry, jobIdFor, queuedInTests };
+module.exports = { QUEUE_NAME, JOBS, enqueueWebhookRetry, scheduleReconciliation, closeQueue, queuedInTests };

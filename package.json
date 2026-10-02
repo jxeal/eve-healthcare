@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "worker": "node src/workers/webhook.worker.js",
+    "worker": "node src/workers/paymentJobs.worker.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

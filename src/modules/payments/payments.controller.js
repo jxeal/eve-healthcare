@@ -18,13 +18,18 @@ function readIdempotencyKey(req) {
   return parsed.data;
 }
 
+function paymentStatusCode(payment, replay) {
+  if (replay) return 200;
+  return payment.status === 'PENDING' ? 202 : 201;
+}
+
 const createPayment = asyncHandler(async (req, res) => {
   const { payment, replay } = await service.createPayment(req.user.id, {
     bookingId: req.body.bookingId,
     simulate: req.body.simulate,
     idempotencyKey: readIdempotencyKey(req),
   });
-  return res.status(replay ? 200 : 201).json(payment);
+  return res.status(paymentStatusCode(payment, replay)).json(payment);
 });
 
 const getPaymentById = asyncHandler(async (req, res) =>
@@ -33,7 +38,7 @@ const getPaymentById = asyncHandler(async (req, res) =>
 
 const webhook = asyncHandler(async (req, res) => {
   const result = await webhookService.receiveWebhook(req.body, JSON.parse(req.rawBody));
-  return res.status(result.queued ? 202 : 200).json(result);
+  return res.status(result.deferred ? 202 : 200).json(result);
 });
 
 module.exports = { createPayment, getPaymentById, webhook };

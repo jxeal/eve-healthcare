@@ -35,7 +35,8 @@ const router = express.Router();
  *               simulate: { type: string, enum: [SUCCESS, FAILED, PENDING] }
  *               idempotencyKey: { type: string, description: Alternative to the header }
  *     responses:
- *       201: { description: Payment, content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+ *       201: { description: Settled payment (SUCCESS or FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/Payment' } } } }
+ *       202: { description: 'Attempt still PENDING: the provider answers later, or the save is being retried by reconciliation' }
  *       200: { description: Idempotent replay of an existing attempt }
  *       403: { description: Not the booking owner }
  *       404: { description: Booking not found }
@@ -71,11 +72,10 @@ router.post('/', auth, paymentsLimiter, validate(createPaymentSchema), controlle
  *               status: { type: string, enum: [SUCCESS, FAILED] }
  *     responses:
  *       200: { description: '{ ok, deduped, applied }' }
- *       202: { description: 'Stored; processing failed and was queued for retry ({ ok, queued: true })' }
+ *       202: { description: 'Stored; processing failed and will be retried ({ ok, deduped, deferred: true })' }
  *       401: { description: Missing, invalid or stale signature }
  *       404: { description: Unknown payment reference (nothing stored) }
  *       422: { description: Malformed payload or mismatched references }
- *       503: { description: Stored but neither processed nor queued; redeliver }
  */
 router.post('/webhook', webhookLimiter, verifyWebhookSignature, validate(webhookSchema), controller.webhook);
 

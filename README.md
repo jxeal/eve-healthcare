@@ -66,9 +66,9 @@ All paths are under `/api/v1`. Errors always look like `{ "error": { "code", "me
 | `GET /bookings?page&limit` | user | 200 own bookings | 401 |
 | `GET /bookings/:id` | owner | 200 booking with centre, test and payment attempts | 403, 404 |
 | `POST /bookings/:id/cancel` | owner | 200 booking (CANCELLED) | 403, 404, 409 |
-| `POST /payments` `{bookingId, simulate?}` + optional `Idempotency-Key` | owner | 201 payment, 200 on replay | 403, 404, 409, 422 |
+| `POST /payments` `{bookingId, simulate?}` + optional `Idempotency-Key` | owner | 201 settled payment, 202 while PENDING, 200 on replay | 403, 404, 409, 422 |
 | `GET /payments/:id` | owner | 200 payment | 403, 404 |
-| `POST /payments/webhook` `{eventId, paymentId or providerTxnId, status}` | HMAC signature | 200 `{ok, deduped, applied}`, 202 when queued | 401, 404, 422, 503 |
+| `POST /payments/webhook` `{eventId, paymentId or providerTxnId, status}` | HMAC signature | 200 `{ok, deduped, applied}`, 202 when deferred | 401, 404, 422 |
 
 Signup always creates a `USER`. Admins come from the seed script; promoting someone else means
 setting `role = 'ADMIN'` in the database. Admin routes read the role from the database on every
@@ -153,8 +153,10 @@ creating a payment attempt, settling one, processing a webhook and cancelling.
 
 1. Under the lock, check ownership, replay an existing `Idempotency-Key`, refuse CANCELLED,
    CONFIRMED, past or in-progress bookings, and insert a PENDING attempt. Then commit.
-2. Call the gateway outside any transaction.
-3. Under the lock again, move the attempt to SUCCESS or FAILED and update the booking.
+2. Call the gateway outside any transaction, passing the attempt id as the provider reference.
+3. Under the lock again, move the attempt to SUCCESS or FAILED and update the booking. A failed
+   save is retried 3 times. If the gateway call or the save still fails, the attempt stays PENDING
+   and the API answers `202` instead of `500`; the reconciliation job settles it later.
 
 Concurrent requests for one booking queue on the lock, and all but the first get
 `409 PAYMENT_IN_PROGRESS`. The gateway is charged once. Cancelling while an attempt is PENDING
@@ -172,9 +174,27 @@ returns `409 PAYMENT_IN_PROGRESS`, so a booking can't end up cancelled with a ca
 4. Only PENDING payments change. An event for a payment that has already settled is recorded with
    `outcome: IGNORED` and returns `applied: false`. A late FAILED never undoes a SUCCESS.
 5. If processing throws, the transaction rolls back and the event stays unprocessed. The endpoint
-   queues a BullMQ job and returns 202. The worker retries up to 5 times with exponential backoff
-   from 2 s. If Redis is down too, the endpoint returns 503 so the provider redelivers, and a
-   redelivery of an unprocessed event is processed rather than deduped.
+   queues a retry job and returns `202 {deferred: true}`. A provider redelivery of an unprocessed
+   event is processed rather than deduped.
+
+### Background jobs
+
+One BullMQ queue (`payment-jobs`) carries two kinds of job. The worker runs inside the API process,
+and `npm run worker` adds more worker processes.
+
+- `process-webhook-event` retries a deferred webhook event up to 5 times with exponential backoff
+  from 2 s. Every retry is a new job, because BullMQ silently skips an add whose job id it still
+  remembers.
+- `reconcile-payments` runs every `RECONCILE_INTERVAL_SEC` (60). It asks the gateway about every
+  attempt that has been PENDING longer than `PAYMENT_STALE_AFTER_SEC` (120): a final result is
+  applied, a charge the gateway never saw is marked FAILED, and a charge still pending at the
+  provider after `PAYMENT_PENDING_EXPIRY_SEC` (1800) is cancelled and marked FAILED. Either way the
+  booking can be paid again or cancelled. The same job reprocesses webhook events left unprocessed
+  for `WEBHOOK_RETRY_AFTER_SEC` (60), so a lost retry job or a Redis outage only delays them.
+
+On SIGTERM the server stops accepting connections, lets in-flight requests finish, then closes the
+worker, the queue and the database pool. The Docker image runs node through `exec` so it receives
+the signal.
 
 ## Other bonus pieces
 
@@ -190,8 +210,11 @@ returns `409 PAYMENT_IN_PROGRESS`, so a booking can't end up cancelled with a ca
 
 - The mock gateway answers synchronously unless `simulate: "PENDING"` asks it to behave like an
   asynchronous provider. That mode is what gives the webhook something to settle.
+- The mock gateway keeps its ledger in memory, standing in for the provider's payment-status API.
+  After a restart it has forgotten earlier charges, so reconciliation marks those attempts FAILED;
+  a real provider would report the true outcome.
 - A settled payment (SUCCESS, FAILED or REFUNDED) is final. A provider that changes its mind after
-  the fact would need a reconciliation flow, which is out of scope.
+  the fact would need a dispute or refund flow, which is out of scope.
 - Tests are retired with `isActive: false` instead of deleted, because bookings reference them.
   Retired tests vanish from public lists and can't be booked.
 - Appointment slots have no capacity limit. Any future time is bookable.
@@ -199,8 +222,8 @@ returns `409 PAYMENT_IN_PROGRESS`, so a booking can't end up cancelled with a ca
 
 ## What I would do with more time
 
-- A reconciliation job for payments stuck in PENDING, for example when the process dies between
-  charging and settling.
+- A dead-letter view and alerting for webhook events that keep failing; today they stay visible
+  with `attempts` and `lastError` and are retried every sweep.
 - Rotate webhook secrets (accept the old and new one during a window) and keep a ledger of
   processed provider transaction ids.
 - Appointment slots with capacity per centre, so two people can't book the last slot.

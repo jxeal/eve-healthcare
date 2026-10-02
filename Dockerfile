@@ -19,4 +19,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-CMD ["sh", "-c", "npx prisma migrate deploy && node src/server.js"]
+# exec makes node PID 1, so it receives SIGTERM from `docker stop` and shuts down gracefully.
+CMD ["sh", "-c", "npx prisma migrate deploy && exec node src/server.js"]

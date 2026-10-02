@@ -29,6 +29,12 @@ module.exports = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',
   webhookSecret: secret('WEBHOOK_SECRET', 'dev-webhook-secret'),
   webhookToleranceSec: int('WEBHOOK_TOLERANCE_SEC', 300),
+  reconcile: {
+    intervalSec: int('RECONCILE_INTERVAL_SEC', 60),
+    staleAfterSec: int('PAYMENT_STALE_AFTER_SEC', 120),
+    pendingExpirySec: int('PAYMENT_PENDING_EXPIRY_SEC', 1800),
+    webhookRetryAfterSec: int('WEBHOOK_RETRY_AFTER_SEC', 60),
+  },
   rateLimit: {
     authMax: int('RATE_LIMIT_AUTH_MAX', 20),
     paymentsMax: int('RATE_LIMIT_PAYMENTS_MAX', 30),

@@ -105,6 +105,7 @@ model Payment {
   webhookEvents  WebhookEvent[]
 
   @@index([bookingId])
+  @@index([status, createdAt])
 }
 
 model WebhookEvent {
@@ -120,4 +121,5 @@ model WebhookEvent {
   processedAt DateTime?
 
   @@index([paymentId])
+  @@index([processedAt, receivedAt])
 }

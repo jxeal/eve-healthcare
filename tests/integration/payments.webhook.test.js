@@ -8,7 +8,8 @@ const { prisma } = require('../../src/config/db');
 const gateway = require('../../src/modules/payments/mockGateway');
 const paymentsService = require('../../src/modules/payments/payments.service');
 const webhookService = require('../../src/modules/payments/webhook.service');
-const queue = require('../../src/queue/webhook.queue');
+const queue = require('../../src/queue/paymentJobs');
+const { runReconciliation } = require('../../src/modules/payments/reconciliation.service');
 
 let alice;
 let bob;
@@ -49,7 +50,7 @@ const bookingRow = (id) => prisma.booking.findUnique({ where: { id }, include: {
 async function pendingPayment() {
   const booking = await makeBooking();
   const res = await pay(booking.id, { simulate: 'PENDING' });
-  expect(res.status).toBe(201);
+  expect(res.status).toBe(202);
   expect(res.body.status).toBe('PENDING');
   return { booking, payment: res.body };
 }
@@ -381,14 +382,14 @@ describe('Webhook — retries', () => {
     expect((await bookingRow(booking.id)).status).toBe('CONFIRMED');
   });
 
-  test('processing failure → 202 queued, state rolled back, worker retry then applies it', async () => {
+  test('processing failure → 202 deferred, state rolled back, worker retry then applies it', async () => {
     const { booking, payment } = await pendingPayment();
     const id = eventId('_flaky');
     jest.spyOn(paymentsService, 'applyPaymentStatus').mockRejectedValueOnce(new Error('db blip'));
 
     const res = await postWebhook({ eventId: id, paymentId: payment.id, status: 'SUCCESS' });
     expect(res.status).toBe(202);
-    expect(res.body).toEqual({ ok: true, deduped: false, queued: true });
+    expect(res.body).toEqual({ ok: true, deduped: false, deferred: true });
     expect(queue.queuedInTests()).toContain(id);
     const stored = await prisma.webhookEvent.findUnique({ where: { eventId: id } });
     expect(stored).toMatchObject({ processedAt: null, attempts: 1, lastError: 'db blip' });
@@ -403,16 +404,18 @@ describe('Webhook — retries', () => {
     });
   });
 
-  test('processing failure with the queue down → 503, and redelivery recovers', async () => {
+  test('processing failure with the queue down still answers 202; the reconciliation sweep finishes it', async () => {
     const { booking, payment } = await pendingPayment();
     const body = { eventId: eventId('_down'), paymentId: payment.id, status: 'SUCCESS' };
     jest.spyOn(paymentsService, 'applyPaymentStatus').mockRejectedValueOnce(new Error('db blip'));
     jest.spyOn(queue, 'enqueueWebhookRetry').mockResolvedValueOnce({ queued: false });
 
-    expectErrorShape(await postWebhook(body), 503, 'WEBHOOK_RETRY_LATER');
-    const redelivery = await postWebhook(body);
-    expect(redelivery.status).toBe(200);
-    expect(redelivery.body.deduped).toBe(false);
+    const res = await postWebhook(body);
+    expect(res.status).toBe(202);
+    expect(res.body.deferred).toBe(true);
+    expect((await bookingRow(booking.id)).status).toBe('PENDING');
+
+    await runReconciliation({ now: new Date(Date.now() + 2 * 60 * 1000) });
     expect((await bookingRow(booking.id)).status).toBe('CONFIRMED');
   });
 });

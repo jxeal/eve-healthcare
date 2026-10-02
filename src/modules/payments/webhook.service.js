@@ -1,16 +1,11 @@
 'use strict';
 
-// Store-then-process webhook ingestion:
-//  1. The event row is inserted (ON CONFLICT DO NOTHING) before any work.
-//  2. Processing runs in one transaction that locks the event row, so concurrent
-//     duplicates serialise and the loser sees processedAt and reports deduped.
-//  3. If processing throws, the transaction rolls back and the row stays unprocessed:
-//     a provider redelivery or the BullMQ worker processes it again.
+// The event row is stored before processing, so a failure leaves it for a retry instead of losing it.
 const { prisma } = require('../../config/db');
 const { ApiError } = require('../../utils/errors');
 const logger = require('../../utils/logger');
 const payments = require('./payments.service');
-const queue = require('../../queue/webhook.queue');
+const queue = require('../../queue/paymentJobs');
 
 async function resolvePayment({ paymentId, providerTxnId }) {
   const payment = await prisma.payment.findUnique({
@@ -71,12 +66,10 @@ async function receiveWebhook({ eventId, paymentId, providerTxnId, status }, pay
   try {
     return await processWebhookEvent(eventId);
   } catch (err) {
+    // Stored events are owned from here: the retry job, or failing that the reconciliation sweep, finishes them.
     await recordWebhookFailure(eventId, err);
-    const { queued } = await queue.enqueueWebhookRetry(eventId);
-    if (!queued) {
-      throw new ApiError(503, 'WEBHOOK_RETRY_LATER', 'Event stored but not processed; redeliver later');
-    }
-    return { ok: true, deduped: false, queued: true };
+    await queue.enqueueWebhookRetry(eventId);
+    return { ok: true, deduped: false, deferred: true };
   }
 }
 
