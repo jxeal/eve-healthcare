@@ -1,7 +1,7 @@
 {
   "name": "eve-healthcare",
   "version": "1.0.0",
-  "description": "EVE Healthcare — diagnostic test bookings + simulated payments (Express.js)",
+  "description": "EVE Healthcare: diagnostic test bookings and simulated payments (Express.js)",
   "type": "commonjs",
   "main": "src/server.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "seed": "node prisma/seed.js",
     "test": "jest --runInBand --detectOpenHandles",
     "test:watch": "jest --runInBand --watch",
-    "lint": "node --check src/app.js || true"
+    "webhook": "node scripts/send-webhook.js"
   },
   "dependencies": {
     "@prisma/client": "^5.18.0",
@@ -29,13 +29,13 @@
     "jsonwebtoken": "^9.0.2",
     "pino": "^9.4.0",
     "pino-http": "^10.1.0",
+    "prisma": "^5.18.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "jest": "^29.7.0",
-    "prisma": "^5.18.0",
     "supertest": "^6.3.4"
   }
 }
