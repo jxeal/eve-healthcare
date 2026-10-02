@@ -8,12 +8,12 @@ const TTL_SEC = 60;
 
 async function listTestsFlat(query = {}) {
   const { page, limit, skip, take } = parsePagination(query);
-  const centreId = typeof query.centreId === 'string' && query.centreId ? query.centreId : undefined;
+  const { centreId } = query;
   const cacheKey = `eve:tests:flat:${centreId || 'all'}:${page}:${limit}`;
-  const cached = await cacheGet(cacheKey);
-  if (cached) return cached;
+  const hit = await cacheGet(cacheKey);
+  if (hit) return hit;
 
-  const where = centreId ? { centreId } : {};
+  const where = { isActive: true, ...(centreId ? { centreId } : {}) };
   const [rows, total] = await Promise.all([
     prisma.diagnosticTest.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } }),
     prisma.diagnosticTest.count({ where }),
