@@ -4,42 +4,56 @@ const { prisma } = require('../../config/db');
 const { ApiError } = require('../../utils/errors');
 const { parsePagination, buildPagination } = require('../../utils/pagination');
 
-// Booking state machine (AGENT_TASKS.md §0.3).
+// The only place booking status changes are defined. Anything missing is forbidden.
 const TRANSITIONS = {
-  'PENDING|SUCCESS': 'CONFIRMED',
-  'PENDING|FAILED': 'FAILED',
-  'PENDING|CANCEL': 'CANCELLED',
-  'CONFIRMED|CANCEL': 'CANCELLED',
+  PENDING: { PAYMENT_SUCCEEDED: 'CONFIRMED', PAYMENT_FAILED: 'FAILED', CANCEL: 'CANCELLED' },
+  FAILED: { PAYMENT_SUCCEEDED: 'CONFIRMED', CANCEL: 'CANCELLED' },
+  CONFIRMED: { CANCEL: 'CANCELLED' },
+  CANCELLED: {},
 };
 
-function canTransition(from, event) {
-  return TRANSITIONS[`${from}|${event}`] || null;
+function nextStatus(from, event) {
+  return (TRANSITIONS[from] && TRANSITIONS[from][event]) || null;
 }
-const transition = canTransition;
 
 const BOOKING_INCLUDE = { centre: true, test: true };
+const BOOKING_DETAIL_INCLUDE = { ...BOOKING_INCLUDE, payments: { orderBy: { createdAt: 'asc' } } };
+
+const bookingNotFound = () => new ApiError(404, 'NOT_FOUND', 'Booking not found');
+
+function assertOwner(booking, userId) {
+  if (!booking) throw bookingNotFound();
+  if (booking.userId !== userId) throw new ApiError(403, 'FORBIDDEN', 'You do not own this booking');
+}
+
+// Row lock that serialises every status change (payments, webhooks, cancel) on one booking.
+async function lockBooking(tx, id) {
+  const rows = await tx.$queryRaw`SELECT id FROM "Booking" WHERE id = ${id} FOR UPDATE`;
+  if (rows.length === 0) return null;
+  return tx.booking.findUnique({ where: { id } });
+}
+
+// Caller must hold the booking lock.
+async function applyPaymentOutcome(tx, booking, paymentStatus) {
+  const event = paymentStatus === 'SUCCESS' ? 'PAYMENT_SUCCEEDED' : 'PAYMENT_FAILED';
+  const status = nextStatus(booking.status, event);
+  if (!status) return booking;
+  return tx.booking.update({ where: { id: booking.id }, data: { status } });
+}
 
 async function createBooking(userId, { centreId, testId, appointmentAt }) {
   const centre = await prisma.centre.findUnique({ where: { id: centreId } });
   if (!centre) throw new ApiError(404, 'CENTRE_NOT_FOUND', 'Centre not found');
   const test = await prisma.diagnosticTest.findUnique({ where: { id: testId } });
   if (!test) throw new ApiError(404, 'TEST_NOT_FOUND', 'Diagnostic test not found');
-  if (!test.isActive) throw new ApiError(422, 'VALIDATION_ERROR', 'Diagnostic test is not active');
   if (test.centreId !== centreId) {
     throw new ApiError(422, 'TEST_CENTRE_MISMATCH', 'Test does not belong to the specified centre');
   }
-  const booking = await prisma.booking.create({
-    data: {
-      userId,
-      centreId,
-      testId,
-      appointmentAt: new Date(appointmentAt),
-      amount: test.price,
-      status: 'PENDING',
-    },
+  if (!test.isActive) throw new ApiError(422, 'TEST_INACTIVE', 'Diagnostic test is no longer offered');
+  return prisma.booking.create({
+    data: { userId, centreId, testId, appointmentAt: new Date(appointmentAt), amount: test.price },
     include: BOOKING_INCLUDE,
   });
-  return booking;
 }
 
 async function listBookings(userId, query = {}) {
@@ -53,53 +67,34 @@ async function listBookings(userId, query = {}) {
 }
 
 async function getBookingById(userId, id) {
-  const booking = await prisma.booking.findUnique({ where: { id }, include: BOOKING_INCLUDE });
-  if (!booking) throw new ApiError(404, 'NOT_FOUND', 'Booking not found');
-  if (booking.userId !== userId) throw new ApiError(403, 'FORBIDDEN', 'You do not own this booking');
+  const booking = await prisma.booking.findUnique({ where: { id }, include: BOOKING_DETAIL_INCLUDE });
+  assertOwner(booking, userId);
   return booking;
 }
 
 async function cancelBooking(userId, id) {
-  const booking = await prisma.booking.findUnique({ where: { id } });
-  if (!booking) throw new ApiError(404, 'NOT_FOUND', 'Booking not found');
-  if (booking.userId !== userId) throw new ApiError(403, 'FORBIDDEN', 'You do not own this booking');
-  if (booking.status === 'CANCELLED' || booking.status === 'FAILED') {
-    throw new ApiError(409, 'BOOKING_NOT_CANCELLABLE', 'Booking cannot be cancelled');
-  }
-  return prisma.booking.update({
-    where: { id },
-    data: { status: 'CANCELLED' },
-    include: BOOKING_INCLUDE,
+  return prisma.$transaction(async (tx) => {
+    const booking = await lockBooking(tx, id);
+    assertOwner(booking, userId);
+    const status = nextStatus(booking.status, 'CANCEL');
+    if (!status) throw new ApiError(409, 'BOOKING_NOT_CANCELLABLE', `A ${booking.status} booking cannot be cancelled`);
+    const inFlight = await tx.payment.count({ where: { bookingId: id, status: 'PENDING' } });
+    if (inFlight) {
+      throw new ApiError(409, 'PAYMENT_IN_PROGRESS', 'A payment is in progress; cancel after it settles');
+    }
+    // Simulated refund: a cancelled booking never keeps a captured payment.
+    await tx.payment.updateMany({ where: { bookingId: id, status: 'SUCCESS' }, data: { status: 'REFUNDED' } });
+    return tx.booking.update({ where: { id }, data: { status }, include: BOOKING_DETAIL_INCLUDE });
   });
 }
 
-// Drives PENDING bookings from payment/webhook outcomes. Terminal-safe:
-// CONFIRMED is never flipped by a late FAILED event; CANCELLED never moves.
-// FAILED may still reach CONFIRMED via a successful payment retry (§0.3).
-async function applyPaymentResult(bookingId, status) {
-  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
-  if (!booking) throw new ApiError(404, 'NOT_FOUND', 'Booking not found');
-  if (status === 'SUCCESS') {
-    if (booking.status === 'PENDING' || booking.status === 'FAILED') {
-      return prisma.booking.update({ where: { id: bookingId }, data: { status: 'CONFIRMED' } });
-    }
-    return booking;
-  }
-  if (status === 'FAILED') {
-    if (booking.status === 'PENDING') {
-      return prisma.booking.update({ where: { id: bookingId }, data: { status: 'FAILED' } });
-    }
-    return booking;
-  }
-  return booking;
-}
-
 module.exports = {
+  nextStatus,
+  lockBooking,
+  applyPaymentOutcome,
+  assertOwner,
   createBooking,
   listBookings,
   getBookingById,
   cancelBooking,
-  applyPaymentResult,
-  canTransition,
-  transition,
 };
