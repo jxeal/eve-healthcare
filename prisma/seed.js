@@ -48,13 +48,22 @@ const CENTRES = [
   },
 ];
 
+// Never promote an existing account: anyone could have registered the admin email before the seed ran.
+async function seedAdmin() {
+  const existing = await prisma.user.findUnique({ where: { email: ADMIN_EMAIL } });
+  if (existing && existing.role !== 'ADMIN') {
+    throw new Error(`${ADMIN_EMAIL} belongs to an existing non-admin account; set SEED_ADMIN_EMAIL to another address`);
+  }
+  if (!existing) {
+    await prisma.user.create({
+      data: { name: 'Admin', email: ADMIN_EMAIL, passwordHash: await hash(ADMIN_PASSWORD), role: 'ADMIN' },
+    });
+  }
+  console.log(`admin: ${ADMIN_EMAIL}${existing ? ' (already exists)' : ''}`);
+}
+
 async function main() {
-  await prisma.user.upsert({
-    where: { email: ADMIN_EMAIL },
-    update: { role: 'ADMIN' },
-    create: { name: 'Admin', email: ADMIN_EMAIL, passwordHash: await hash(ADMIN_PASSWORD), role: 'ADMIN' },
-  });
-  console.log(`admin: ${ADMIN_EMAIL}`);
+  await seedAdmin();
 
   for (const { tests, ...data } of CENTRES) {
     const centre =

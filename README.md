@@ -45,7 +45,9 @@ docker compose exec -e SEED_ADMIN_PASSWORD='choose-one' api node prisma/seed.js
 
 Compose refuses to start while either secret is empty, and the app refuses to boot in production
 with a secret shorter than 32 characters. The container runs `prisma migrate deploy` before
-booting. The seed refuses to create the default admin password in production.
+booting. The seed refuses to create the default admin password in production, and it never
+promotes an existing account: if a non-admin already registered the admin email, it stops with an
+error.
 
 ## Endpoints
 
