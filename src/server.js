@@ -20,7 +20,9 @@ function shutdown(signal) {
   logger.info({ event: 'server.shutdown', signal });
   setTimeout(() => process.exit(1), SHUTDOWN_TIMEOUT_MS).unref();
   server.close(async () => {
-    await Promise.allSettled([stopWorker(), closeQueue(), prisma.$disconnect(), closeCache()]);
+    // In-flight jobs still need the database, so the worker stops before anything else closes.
+    await stopWorker().catch((err) => logger.warn({ event: 'worker.stop_failed', err: err.message }));
+    await Promise.allSettled([closeQueue(), prisma.$disconnect(), closeCache()]);
     process.exit(0);
   });
 }

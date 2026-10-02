@@ -49,7 +49,8 @@ async function stopWorker() {
 if (require.main === module) {
   startWorker();
   const shutdown = async () => {
-    await Promise.allSettled([stopWorker(), closeQueue(), prisma.$disconnect()]);
+    await stopWorker().catch((err) => logger.warn({ event: 'worker.stop_failed', err: err.message }));
+    await Promise.allSettled([closeQueue(), prisma.$disconnect()]);
     process.exit(0);
   };
   process.once('SIGTERM', shutdown);
