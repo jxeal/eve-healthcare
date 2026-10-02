@@ -2,155 +2,99 @@
 
 const { prisma } = require('../../config/db');
 const { ApiError } = require('../../utils/errors');
+const { scopedKey } = require('../../utils/idempotency');
 const logger = require('../../utils/logger');
+const bookings = require('../bookings/bookings.service');
 const gateway = require('./mockGateway');
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function loadBookingsService() {
-  try {
-    // Agent-3 owns this module; fall back to a direct update when absent.
-    return require('../bookings/bookings.service');
-  } catch {
-    return null;
-  }
-}
-
-// Applies a gateway outcome to the booking via Agent-3's helper when
-// available, otherwise updates PENDING bookings directly (terminal-safe).
-async function applyResult(bookingId, status) {
-  const bookings = loadBookingsService();
-  if (bookings && typeof bookings.applyPaymentResult === 'function') {
-    return bookings.applyPaymentResult(bookingId, status);
-  }
-  const booking = await prisma.booking.findUnique({ where: { id: bookingId } });
-  if (!booking) return null;
-  if (booking.status === 'PENDING') {
-    return prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: status === 'SUCCESS' ? 'CONFIRMED' : 'FAILED' },
-    });
-  }
-  if (booking.status === 'FAILED' && status === 'SUCCESS') {
-    return prisma.booking.update({ where: { id: bookingId }, data: { status: 'CONFIRMED' } });
-  }
-  return booking;
-}
-
-function withoutBooking(payment) {
-  if (!payment) return payment;
-  const { booking: _booking, ...rest } = payment;
+function toPublic(payment) {
+  const { idempotencyKey: _key, booking: _booking, ...rest } = payment;
   return rest;
 }
 
-async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
-  const key =
-    typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+// Inserts a PENDING attempt under the booking lock *before* charging, so concurrent
+// requests can never reach the gateway twice for one booking.
+async function claimAttempt(userId, bookingId, keyHash) {
+  return prisma.$transaction(async (tx) => {
+    const booking = await bookings.lockBooking(tx, bookingId);
+    bookings.assertOwner(booking, userId);
 
-  // 1. Idempotency replay wins: same key → SAME payment, no new charge.
-  if (key) {
-    const existing = await prisma.payment.findUnique({
-      where: { idempotencyKey: key },
-      include: { booking: true },
-    });
-    if (existing) {
-      if (existing.booking.userId !== userId) {
-        throw new ApiError(403, 'FORBIDDEN', 'Idempotency key already in use');
+    if (keyHash) {
+      const existing = await tx.payment.findUnique({ where: { idempotencyKey: keyHash } });
+      if (existing) {
+        if (existing.bookingId !== bookingId) {
+          throw new ApiError(422, 'IDEMPOTENCY_KEY_REUSED', 'Idempotency key was already used for another booking');
+        }
+        return { payment: existing, replay: true };
       }
-      logger.info({
-        event: 'payment.idempotent_replay',
-        paymentId: existing.id,
-        bookingId: existing.bookingId,
-      });
-      return { payment: withoutBooking(existing), replay: true };
     }
-  }
 
-  // 2. Booking guards.
-  if (!UUID_RE.test(bookingId || '')) throw new ApiError(404, 'NOT_FOUND', 'Booking not found');
-  const booking = await prisma.booking.findUnique({
-    where: { id: bookingId },
-    include: { payment: true },
-  });
-  if (!booking) throw new ApiError(404, 'NOT_FOUND', 'Booking not found');
-  if (booking.userId !== userId) {
-    throw new ApiError(403, 'FORBIDDEN', 'You do not own this booking');
-  }
-  if (booking.status === 'CANCELLED') {
-    throw new ApiError(409, 'BOOKING_CANCELLED', 'Cannot pay for a cancelled booking');
-  }
-  if ((booking.payment && booking.payment.status === 'SUCCESS') || booking.status === 'CONFIRMED') {
-    throw new ApiError(409, 'PAYMENT_ALREADY_EXISTS', 'Booking is already paid');
-  }
+    if (booking.status === 'CANCELLED') {
+      throw new ApiError(409, 'BOOKING_CANCELLED', 'Cannot pay for a cancelled booking');
+    }
+    if (booking.status === 'CONFIRMED') {
+      throw new ApiError(409, 'PAYMENT_ALREADY_EXISTS', 'Booking is already paid');
+    }
+    const inFlight = await tx.payment.findFirst({ where: { bookingId, status: 'PENDING' } });
+    if (inFlight) throw new ApiError(409, 'PAYMENT_IN_PROGRESS', 'A payment for this booking is in progress');
 
-  // 3. Charge through the simulated gateway.
-  const result = await gateway.charge({ amount: Number(booking.amount), simulate });
-  logger.info({ event: 'payment.gateway_result', bookingId, status: result.status });
-
-  // Retry path: a FAILED payment row already exists for this booking
-  // (bookingId is UNIQUE), so recharge into the same row.
-  if (booking.payment) {
-    const payment = await prisma.payment.update({
-      where: { id: booking.payment.id },
-      data: {
-        amount: booking.amount,
-        status: result.status,
-        providerTxnId: result.providerTxnId,
-        ...(key ? { idempotencyKey: key } : {}),
-      },
+    const payment = await tx.payment.create({
+      data: { bookingId, amount: booking.amount, idempotencyKey: keyHash },
     });
-    try {
-      await applyResult(bookingId, result.status);
-    } catch (err) {
-      logger.warn({ event: 'payment.apply_failed', bookingId, status: result.status, err: err && err.message });
-    }
-    logger.info({ event: 'payment.retried', paymentId: payment.id, bookingId, status: payment.status });
     return { payment, replay: false };
+  });
+}
+
+// Moves a PENDING payment to SUCCESS/FAILED and drives the booking. Settled payments are
+// never changed again, so late or conflicting outcomes return { applied: false }.
+async function applyPaymentStatus(tx, paymentId, status, providerTxnId) {
+  const { bookingId } = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
+  const booking = await bookings.lockBooking(tx, bookingId);
+  const payment = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
+  const recordTxn = providerTxnId && !payment.providerTxnId ? { providerTxnId } : null;
+
+  if (payment.status !== 'PENDING' || status === 'PENDING') {
+    if (!recordTxn) return { payment, applied: false };
+    return { payment: await tx.payment.update({ where: { id: paymentId }, data: recordTxn }), applied: false };
   }
 
-  let payment;
+  const updated = await tx.payment.update({ where: { id: paymentId }, data: { status, ...recordTxn } });
+  await bookings.applyPaymentOutcome(tx, booking, status);
+  return { payment: updated, applied: true };
+}
+
+async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
+  const keyHash = idempotencyKey ? scopedKey(userId, idempotencyKey) : null;
+  let claim;
   try {
-    payment = await prisma.payment.create({
-      data: {
-        bookingId,
-        amount: booking.amount,
-        status: result.status,
-        providerTxnId: result.providerTxnId,
-        idempotencyKey: key,
-      },
-    });
+    claim = await claimAttempt(userId, bookingId, keyHash);
   } catch (err) {
-    if (err && err.code === 'P2002') {
-      // Lost a race (same idempotency key / booking): return the winner.
-      const winner = key
-        ? await prisma.payment.findUnique({ where: { idempotencyKey: key } })
-        : await prisma.payment.findUnique({ where: { bookingId } });
-      if (winner) {
-        logger.info({ event: 'payment.race_replay', paymentId: winner.id, bookingId });
-        return { payment: winner, replay: true };
-      }
-    }
-    throw err;
+    // Same key raced on two bookings: the unique index rejected the loser; re-run to classify it.
+    if (err.code !== 'P2002') throw err;
+    claim = await claimAttempt(userId, bookingId, keyHash);
   }
 
-  try {
-    await applyResult(bookingId, result.status);
-  } catch (err) {
-    logger.warn({ event: 'payment.apply_failed', bookingId, status: result.status, err: err && err.message });
+  if (claim.replay) {
+    logger.info({ event: 'payment.idempotent_replay', paymentId: claim.payment.id, bookingId });
+    return { payment: toPublic(claim.payment), replay: true };
   }
-  const fresh = await prisma.payment.findUnique({ where: { id: payment.id } });
-  logger.info({ event: 'payment.created', paymentId: payment.id, bookingId, status: payment.status });
-  return { payment: fresh || payment, replay: false };
+
+  const result = await gateway.charge({ simulate });
+  const { payment } = await prisma.$transaction((tx) =>
+    applyPaymentStatus(tx, claim.payment.id, result.status, result.providerTxnId)
+  );
+  logger.info({ event: 'payment.charged', paymentId: payment.id, bookingId, status: payment.status });
+  return { payment: toPublic(payment), replay: false };
 }
 
 async function getPaymentById(userId, id) {
-  if (!UUID_RE.test(id || '')) throw new ApiError(404, 'NOT_FOUND', 'Payment not found');
-  const payment = await prisma.payment.findUnique({ where: { id }, include: { booking: true } });
+  const payment = await prisma.payment.findUnique({
+    where: { id },
+    include: { booking: { select: { userId: true } } },
+  });
   if (!payment) throw new ApiError(404, 'NOT_FOUND', 'Payment not found');
-  if (payment.booking.userId !== userId) {
-    throw new ApiError(403, 'FORBIDDEN', 'You do not own this payment');
-  }
-  return withoutBooking(payment);
+  if (payment.booking.userId !== userId) throw new ApiError(403, 'FORBIDDEN', 'You do not own this payment');
+  return toPublic(payment);
 }
 
-module.exports = { createPayment, getPaymentById, applyResult };
+module.exports = { createPayment, getPaymentById, applyPaymentStatus };
