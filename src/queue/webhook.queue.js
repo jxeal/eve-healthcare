@@ -1,85 +1,68 @@
 'use strict';
 
-// Outbox for webhook apply-retries (the "background jobs" bonus).
-//
-// When the synchronous webhook apply hits a transient downstream error,
-// handleWebhook() returns 200 { retryable: true } AND enqueues this job so
-// the retry happens even if the provider never re-posts. Processing stays
-// idempotent: jobId === eventId (queue-level dedupe of the same event) and
-// the worker re-runs the terminal-safe apply, which no-ops on settled rows.
-//
-// Degradation contract (mirrors the Redis cache philosophy):
-//   - NODE_ENV === 'test'  → in-memory stub, no sockets (jest stays clean).
-//   - Redis down           → logged no-op { queued: false }; the provider
-//                            retry path ({ retryable: true }) still applies.
+const crypto = require('crypto');
+const { Queue } = require('bullmq');
+const config = require('../config');
 const logger = require('../utils/logger');
+const { createQueueConnection } = require('./connection');
 
 const QUEUE_NAME = 'webhook-retries';
-
-let QueueRef = null;
-try {
-  // eslint-disable-next-line global-require
-  QueueRef = require('bullmq').Queue;
-} catch {
-  QueueRef = null;
-}
+const ENQUEUE_TIMEOUT_MS = 2000;
 
 let queue = null;
-const stubJobs = [];
-
-function isStubMode() {
-  return process.env.NODE_ENV === 'test' || !QueueRef;
-}
+const testJobs = [];
 
 function getQueue() {
-  if (isStubMode()) return null;
-  if (queue) return queue;
-  // eslint-disable-next-line global-require
-  const { createQueueConnection } = require('./connection');
-  queue = new QueueRef(QUEUE_NAME, {
-    connection: createQueueConnection(),
-    defaultJobOptions: {
-      attempts: 5,
-      backoff: { type: 'exponential', delay: 2000 },
-      removeOnComplete: 100,
-      removeOnFail: 500,
-    },
-  });
-  queue.on('error', (err) => logger.warn({ event: 'queue.error', err: err && err.message }));
+  if (!queue) {
+    queue = new Queue(QUEUE_NAME, {
+      connection: createQueueConnection(),
+      defaultJobOptions: {
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: 100,
+        removeOnFail: 500,
+      },
+    });
+    queue.on('error', (err) => logger.warn({ event: 'queue.error', err: err.message }));
+  }
   return queue;
 }
 
-async function enqueueWebhookRetry({ eventId, status, paymentId, providerTxnId, bookingId }) {
-  const jobData = { eventId, status, paymentId: paymentId || null, providerTxnId: providerTxnId || null, bookingId: bookingId || null };
-  if (isStubMode()) {
-    stubJobs.push(jobData);
-    logger.info({ event: 'queue.enqueued_stub', eventId, status });
-    return { queued: true, stub: true, jobId: eventId };
+// BullMQ rejects custom job ids containing ':', which provider event ids may have.
+function jobIdFor(eventId) {
+  return `evt-${crypto.createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
+}
+
+// The connection retries forever while Redis is down, so bound the wait.
+function withTimeout(promise, ms) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`enqueue timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function enqueueWebhookRetry(eventId) {
+  if (config.env === 'test') {
+    testJobs.push(eventId);
+    return { queued: true };
   }
   try {
-    const q = getQueue();
-    const job = await q.add('webhook-apply-retry', jobData, { jobId: eventId });
-    logger.info({ event: 'queue.enqueued', eventId, status, jobId: job.id });
-    return { queued: true, stub: false, jobId: job.id };
+    await withTimeout(
+      getQueue().add('process-webhook-event', { eventId }, { jobId: jobIdFor(eventId) }),
+      ENQUEUE_TIMEOUT_MS
+    );
+    logger.info({ event: 'queue.enqueued', eventId });
+    return { queued: true };
   } catch (err) {
-    logger.warn({ event: 'queue.enqueue_failed', eventId, err: err && err.message });
-    return { queued: false, reason: err && err.message };
+    logger.warn({ event: 'queue.enqueue_failed', eventId, err: err.message });
+    return { queued: false };
   }
 }
 
-async function closeWebhookQueue() {
-  try {
-    if (queue) await queue.close();
-  } catch {
-    // ignore
-  } finally {
-    queue = null;
-  }
+// Under NODE_ENV=test nothing reaches Redis; tests inspect what would have been queued.
+function queuedInTests() {
+  return testJobs;
 }
 
-// Test seam: lets a unit/smoke check assert enqueue intent without Redis.
-function __stubJobs() {
-  return stubJobs;
-}
-
-module.exports = { enqueueWebhookRetry, closeWebhookQueue, __stubJobs, QUEUE_NAME };
+module.exports = { QUEUE_NAME, enqueueWebhookRetry, jobIdFor, queuedInTests };
