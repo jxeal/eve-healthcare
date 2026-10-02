@@ -9,6 +9,10 @@ const prisma = new PrismaClient();
 const ADMIN_EMAIL = (process.env.SEED_ADMIN_EMAIL || 'admin@eve.local').toLowerCase();
 const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'Admin@12345';
 
+if (process.env.NODE_ENV === 'production' && !process.env.SEED_ADMIN_PASSWORD) {
+  throw new Error('Set SEED_ADMIN_PASSWORD; the default admin password is public');
+}
+
 const CENTRES = [
   {
     name: 'Apollo Diagnostics',

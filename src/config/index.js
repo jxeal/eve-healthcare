@@ -9,11 +9,15 @@ function int(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+const MIN_SECRET_LENGTH = 32;
+
 function secret(name, devFallback) {
   const value = process.env[name];
-  if (value) return value;
-  if (env === 'production') throw new Error(`${name} must be set in production`);
-  return devFallback;
+  if (env !== 'production') return value || devFallback;
+  if (!value || value.length < MIN_SECRET_LENGTH) {
+    throw new Error(`${name} must be at least ${MIN_SECRET_LENGTH} characters in production`);
+  }
+  return value;
 }
 
 module.exports = {

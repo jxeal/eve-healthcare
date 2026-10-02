@@ -9,15 +9,15 @@ and a health check at `GET /health`.
 ## Run locally
 
 ```bash
-cp .env.example .env                  # set JWT_SECRET and WEBHOOK_SECRET
+cp .env.example .env                  # empty secrets fall back to dev defaults locally
 docker compose up -d postgres redis   # or your own Postgres 16 + Redis 7
 npx prisma migrate deploy             # applies prisma/migrations
 npm run seed                          # admin@eve.local / Admin@12345 + 3 centres with tests
 npm run dev                           # http://localhost:3000
 ```
 
-The webhook retry worker runs inside the API process. `npm run worker` starts it on its own if
-you want to scale it separately.
+The API process also runs the background worker. `npm run worker` starts extra worker processes
+if the queue needs more capacity.
 
 ### Tests
 
@@ -31,13 +31,19 @@ npm test                              # or DATABASE_URL_TEST=... npm test for an
 
 ### Docker
 
+Put real secrets in `.env` first. Compose reads them from there, and so does `npm run webhook`,
+so the host script signs with the same secret as the container:
+
 ```bash
-JWT_SECRET=$(openssl rand -hex 32) WEBHOOK_SECRET=$(openssl rand -hex 32) docker compose up --build
+echo "JWT_SECRET=$(openssl rand -hex 32)" >> .env
+echo "WEBHOOK_SECRET=$(openssl rand -hex 32)" >> .env
+docker compose up --build
+docker compose exec -e SEED_ADMIN_PASSWORD='choose-one' api node prisma/seed.js
 ```
 
-Compose refuses to start without both secrets, and so does the app when `NODE_ENV=production`.
-The container runs `prisma migrate deploy` before booting. It doesn't seed, so run
-`docker compose exec api node prisma/seed.js` once to get an admin.
+Compose refuses to start while either secret is empty, and the app refuses to boot in production
+with a secret shorter than 32 characters. The container runs `prisma migrate deploy` before
+booting. The seed refuses to create the default admin password in production.
 
 ## Endpoints
 
@@ -172,7 +178,8 @@ returns `409 PAYMENT_IN_PROGRESS`, so a booking can't end up cancelled with a ca
 - Rate limits: auth 20 per 15 min per IP, payments 30 per minute per user, webhook 100 per minute
   per IP. The `RATE_LIMIT_*` env vars override them, which the test suite uses.
 - pino writes structured JSON logs (`payment.charged`, `webhook.processed`, `webhook.deduped`,
-  `webhook.process_failed`, ...). Passwords and tokens are never logged.
+  `webhook.process_failed`, ...). The request logger replaces the `Authorization` and
+  `X-Webhook-Signature` headers with `[REDACTED]`, and request bodies (so passwords) are never logged.
 
 ## Assumptions
 
