@@ -1,7 +1,6 @@
 const { app } = require('../../src/app');
 
-// One listening server per test file. Letting supertest open and close a server per
-// request flakes with "socket hang up" / "Parse Error" when ports get reused.
+// One server per test file; supertest's per-request servers flake with "socket hang up" on port reuse.
 function getApp() {
   if (!global.__testServer) global.__testServer = app.listen(0);
   return global.__testServer;

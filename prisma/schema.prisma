@@ -90,8 +90,7 @@ model Booking {
   @@index([testId, centreId])
 }
 
-// One row per payment attempt. The init migration also adds a partial unique index in raw SQL
-// (Payment_bookingId_active_key): at most one PENDING or SUCCESS attempt per booking.
+// One row per attempt. Raw SQL in the init migration limits each booking to one PENDING or SUCCESS attempt.
 model Payment {
   id             String         @id @default(uuid())
   bookingId      String

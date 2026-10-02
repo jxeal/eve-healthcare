@@ -23,10 +23,6 @@ async function createAdmin() {
   return { user, token: issueToken(user) };
 }
 
-async function loginUser(email, password) {
-  return request(getApp()).post('/api/v1/auth/login').send({ email, password });
-}
-
 const authHeader = (token) => ({ Authorization: `Bearer ${token}` });
 
-module.exports = { signupUser, createAdmin, loginUser, authHeader, unique };
+module.exports = { signupUser, createAdmin, authHeader, unique };

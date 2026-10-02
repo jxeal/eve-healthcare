@@ -72,7 +72,6 @@ function tally(counts, handle) {
   };
 }
 
-// Settles PENDING payments the request path couldn't finish and processes stored but unprocessed webhook events.
 async function runReconciliation({ now = new Date() } = {}) {
   const summary = { payments: {}, webhookEvents: {} };
   const stalePayments = { status: 'PENDING', createdAt: { lt: secondsBefore(now, config.reconcile.staleAfterSec) } };

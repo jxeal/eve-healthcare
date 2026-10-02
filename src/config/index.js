@@ -23,7 +23,6 @@ function secret(name, devFallback) {
 module.exports = {
   env,
   port: int('PORT', 3000),
-  databaseUrl: process.env.DATABASE_URL,
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
   jwtSecret: secret('JWT_SECRET', 'dev-jwt-secret'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',

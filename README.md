@@ -68,9 +68,9 @@ All paths are under `/api/v1`. Errors always look like `{ "error": { "code", "me
 | `GET /bookings?page&limit` | user | 200 own bookings | 401 |
 | `GET /bookings/:id` | owner | 200 booking with centre, test and payment attempts | 403, 404 |
 | `POST /bookings/:id/cancel` | owner | 200 booking (CANCELLED) | 403, 404, 409 |
-| `POST /payments` `{bookingId, simulate?}` + optional `Idempotency-Key` | owner | 201 settled payment, 202 while PENDING, 200 on replay | 403, 404, 409, 422 |
+| `POST /payments` `{bookingId, simulate?}` + optional `Idempotency-Key` | owner | 201 settled payment, 202 while PENDING, 200 on replay | 403, 404, 409, 422, 429 |
 | `GET /payments/:id` | owner | 200 payment | 403, 404 |
-| `POST /payments/webhook` `{eventId, paymentId or providerTxnId, status}` | HMAC signature | 200 `{ok, deduped, applied}`, 202 when deferred | 401, 404, 422 |
+| `POST /payments/webhook` `{eventId, paymentId or providerTxnId, status}` | HMAC signature | 200 `{ok, deduped, applied}`, 202 when deferred | 401, 404, 422, 429 |
 
 Signup always creates a `USER`. Admins come from the seed script; promoting someone else means
 setting `role = 'ADMIN'` in the database. Admin routes read the role from the database on every
@@ -217,8 +217,8 @@ the signal.
   a real provider would report the true outcome.
 - A settled payment (SUCCESS, FAILED or REFUNDED) is final. A provider that changes its mind after
   the fact would need a dispute or refund flow, which is out of scope.
-- Tests are retired with `isActive: false` instead of deleted, because bookings reference them.
-  Retired tests vanish from public lists and can't be booked.
+- Diagnostic tests are retired with `isActive: false` instead of deleted, because bookings
+  reference them. Retired tests vanish from public lists and can't be booked.
 - Appointment slots have no capacity limit. Any future time is bookable.
 - Emails are case-insensitive and stored lowercase.
 

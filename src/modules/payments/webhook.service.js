@@ -66,7 +66,7 @@ async function receiveWebhook({ eventId, paymentId, providerTxnId, status }, pay
   try {
     return await processWebhookEvent(eventId);
   } catch (err) {
-    // Stored events are owned from here: the retry job, or failing that the reconciliation sweep, finishes them.
+    // Even if Redis drops the job, the reconciliation sweep finishes the stored event.
     await recordWebhookFailure(eventId, err);
     await queue.enqueueWebhookRetry(eventId);
     return { ok: true, deduped: false, deferred: true };

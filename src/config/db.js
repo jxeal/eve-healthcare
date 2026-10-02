@@ -2,7 +2,7 @@
 
 const { PrismaClient } = require('@prisma/client');
 
-// Cached on global so jest's per-file module registry reuses one client.
+// Kept on global so modules re-required through jest.isolateModules share one client.
 if (!global.__evePrisma) {
   global.__evePrisma = new PrismaClient();
 }

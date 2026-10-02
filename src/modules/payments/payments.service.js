@@ -13,8 +13,7 @@ const SETTLE_RETRY_MS = 100;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Inserts a PENDING attempt under the booking lock *before* charging, so concurrent
-// requests can never reach the gateway twice for one booking.
+// Claims a PENDING attempt under the booking lock before charging, so concurrent requests charge once.
 async function claimAttempt(userId, bookingId, keyHash) {
   return prisma.$transaction(async (tx) => {
     const booking = await bookings.lockBooking(tx, bookingId);
@@ -49,8 +48,7 @@ async function claimAttempt(userId, bookingId, keyHash) {
   });
 }
 
-// Moves a PENDING payment to SUCCESS/FAILED and drives the booking. Settled payments are
-// never changed again, so late or conflicting outcomes return { applied: false }.
+// Settled payments never change again, so late or conflicting outcomes return { applied: false }.
 async function applyPaymentStatus(tx, paymentId, status, providerTxnId) {
   const { bookingId } = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
   const booking = await bookings.lockBooking(tx, bookingId);
@@ -78,7 +76,7 @@ async function settlePayment(paymentId, { status, providerTxnId }) {
   }
 }
 
-// On any failure the attempt stays PENDING and the reconciliation job settles it from the provider's record.
+// On failure the attempt stays PENDING; reconciliation settles it from the provider's record.
 async function chargeAndSettle(attempt, simulate) {
   try {
     const result = await gateway.charge({ reference: attempt.id, simulate });

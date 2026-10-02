@@ -1,6 +1,5 @@
 'use strict';
 
-// Sends a signed webhook, standing in for the payment provider.
 // Usage: npm run webhook -- <paymentId> <SUCCESS|FAILED> [eventId]
 const { randomUUID } = require('crypto');
 const config = require('../src/config');

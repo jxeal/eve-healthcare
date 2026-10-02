@@ -8,7 +8,7 @@ const { closeCache } = require('./config/redis');
 const { closeQueue } = require('./queue/paymentJobs');
 const { startWorker, stopWorker } = require('./workers/paymentJobs.worker');
 
-// Under Docker's default 10 s stop grace period, so we exit before SIGKILL.
+// Below Docker's 10 s stop grace period, so we exit before SIGKILL.
 const SHUTDOWN_TIMEOUT_MS = 8000;
 
 startWorker();

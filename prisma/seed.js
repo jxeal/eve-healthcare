@@ -1,6 +1,6 @@
 'use strict';
 
-// Demo data: an admin account plus 3 centres with 2-3 tests each. Safe to re-run.
+// Safe to re-run: existing rows are left as they are.
 const { PrismaClient } = require('@prisma/client');
 const { hash } = require('../src/utils/password');
 

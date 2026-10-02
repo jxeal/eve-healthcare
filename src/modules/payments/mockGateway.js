@@ -1,10 +1,9 @@
 'use strict';
 
-// Simulated provider: `simulate` forces the outcome, otherwise 80% SUCCESS / 20% FAILED.
 const { randomUUID } = require('crypto');
 
 const LEDGER_LIMIT = 10000;
-// The provider's record of each charge, keyed by our payment id. Kept in memory, so lost on restart.
+// Stands in for the provider's own records, keyed by our payment id; lost on restart.
 const ledger = new Map();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
