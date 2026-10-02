@@ -17,7 +17,11 @@ const centreSchema = z
 const diagnosticTestSchema = z
   .object({
     name: z.string().trim().min(1, 'Name is required'),
-    price: z.coerce.number().positive('Price must be greater than 0').max(99999999.99),
+    price: z
+      .number()
+      .positive('Price must be greater than 0')
+      .multipleOf(0.01, 'Price can have at most 2 decimal places')
+      .max(99999999.99),
     description: z.string().trim().optional(),
     isActive: z.boolean().optional(),
   })

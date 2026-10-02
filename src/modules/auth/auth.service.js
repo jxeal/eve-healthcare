@@ -10,7 +10,7 @@ function toPublic(user) {
 }
 
 function issueToken(user) {
-  return sign({ sub: user.id, email: user.email, role: user.role });
+  return sign({ sub: user.id, email: user.email });
 }
 
 async function signup({ name, email, password }) {

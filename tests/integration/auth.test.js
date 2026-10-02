@@ -2,6 +2,7 @@ const request = require('supertest');
 const { getApp } = require('../helpers/app');
 const { signupUser, authHeader, unique } = require('../helpers/auth');
 const { expectErrorShape } = require('../helpers/assert');
+const { prisma } = require('../../src/config/db');
 
 describe('Auth — POST /api/v1/auth/signup', () => {
   test('creates user, returns 201 with user + token, never leaks password', async () => {
@@ -115,6 +116,19 @@ describe('Auth — email normalisation and roles', () => {
       .send({ email: `  ${email.toUpperCase()} `, password });
     expect(res.status).toBe(200);
     expect(res.body.user.email).toBe(email.toLowerCase());
+  });
+
+  test('the database itself rejects an email differing only in case', async () => {
+    const { email } = await signupUser();
+    await expect(
+      prisma.user.create({ data: { name: 'Dup', email: email.toUpperCase(), passwordHash: 'x' } })
+    ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
+  test('the Bearer scheme is case-insensitive', async () => {
+    const { token } = await signupUser();
+    const res = await request(getApp()).get('/api/v1/auth/me').set('Authorization', `bearer ${token}`);
+    expect(res.status).toBe(200);
   });
 
   test('self-registered accounts are USER, never ADMIN', async () => {

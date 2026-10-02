@@ -71,7 +71,8 @@ All paths are under `/api/v1`. Errors always look like `{ "error": { "code", "me
 | `POST /payments/webhook` `{eventId, paymentId or providerTxnId, status}` | HMAC signature | 200 `{ok, deduped, applied}`, 202 when queued | 401, 404, 422, 503 |
 
 Signup always creates a `USER`. Admins come from the seed script; promoting someone else means
-setting `role = 'ADMIN'` in the database. The role travels in the JWT, so a promoted user has to log in again.
+setting `role = 'ADMIN'` in the database. Admin routes read the role from the database on every
+request, so a promotion or demotion applies immediately without a new token.
 
 ### Example session
 
@@ -124,8 +125,10 @@ User 1──* Booking *──1 Centre 1──* DiagnosticTest
   `userId:key`, which scopes keys per user.
 - **WebhookEvent** uses the provider's `eventId` as its primary key and references the payment it
   settles. It records `processedAt`, `outcome` (APPLIED or IGNORED), `attempts` and `lastError`.
-- Money is `DECIMAL(10,2)`. Every foreign key is `ON DELETE RESTRICT`, so deleting a user or
-  centre can never cascade away payment records.
+- Money is `DECIMAL(10,2)`. The API accepts at most 2 decimal places, and `CHECK` constraints keep
+  prices and amounts above zero even for writes that bypass the API. Every foreign key is
+  `ON DELETE RESTRICT`, so deleting a user or centre can never cascade away payment records.
+- `User.email` is `CITEXT`, so the unique index rejects addresses that differ only in case.
 
 ### Booking states
 
@@ -137,7 +140,9 @@ PENDING | FAILED | CONFIRMED ── cancel ──> CANCELLED
 ```
 
 `nextStatus()` in `bookings.service.js` holds this table and every status change goes through it.
-Cancelling a CONFIRMED booking marks its payment REFUNDED (simulated).
+Cancelling a CONFIRMED booking marks its payment REFUNDED (simulated). Once the appointment time
+has passed, a booking can no longer be paid (`409 APPOINTMENT_PASSED`), and a CONFIRMED one can no
+longer be cancelled for a refund.
 
 ## How payments stay consistent
 
@@ -147,7 +152,7 @@ creating a payment attempt, settling one, processing a webhook and cancelling.
 `POST /payments` runs in three steps:
 
 1. Under the lock, check ownership, replay an existing `Idempotency-Key`, refuse CANCELLED,
-   CONFIRMED or in-progress bookings, and insert a PENDING attempt. Then commit.
+   CONFIRMED, past or in-progress bookings, and insert a PENDING attempt. Then commit.
 2. Call the gateway outside any transaction.
 3. Under the lock again, move the attempt to SUCCESS or FAILED and update the booking.
 

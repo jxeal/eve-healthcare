@@ -67,6 +67,7 @@ router.get('/:id', controller.getById);
  *   post:
  *     tags: [Bookings]
  *     summary: Cancel a PENDING, FAILED or CONFIRMED booking. A captured payment is marked REFUNDED.
+ *     description: A CONFIRMED booking can't be cancelled once its appointment time has passed.
  *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -74,7 +75,7 @@ router.get('/:id', controller.getById);
  *       200: { description: Booking }
  *       403: { description: Not the owner }
  *       404: { description: Booking not found }
- *       409: { description: Already cancelled (BOOKING_NOT_CANCELLABLE) or payment in flight (PAYMENT_IN_PROGRESS) }
+ *       409: { description: 'BOOKING_NOT_CANCELLABLE, PAYMENT_IN_PROGRESS or APPOINTMENT_PASSED' }
  */
 router.post('/:id/cancel', controller.cancel);
 

@@ -3,6 +3,7 @@ const { getApp } = require('../helpers/app');
 const { signupUser, createAdmin, authHeader } = require('../helpers/auth');
 const { expectErrorShape, expectPaginationShape } = require('../helpers/assert');
 const { tag } = require('../helpers/catalog');
+const { prisma } = require('../../src/config/db');
 
 let adminToken;
 let userToken;
@@ -41,6 +42,14 @@ describe('Centres — writes', () => {
   test('POST /centres as a regular user → 403', async () => {
     const res = await createCentre({}, userToken);
     expectErrorShape(res, 403, 'FORBIDDEN');
+  });
+
+  test('roles are read from the database, so changes apply without logging in again', async () => {
+    const user = await signupUser();
+    await prisma.user.update({ where: { id: user.user.id }, data: { role: 'ADMIN' } });
+    expect((await createCentre({}, user.token)).status).toBe(201);
+    await prisma.user.update({ where: { id: user.user.id }, data: { role: 'USER' } });
+    expectErrorShape(await createCentre({}, user.token), 403, 'FORBIDDEN');
   });
 
   test('POST /centres missing name → 422', async () => {
@@ -138,6 +147,18 @@ describe('Diagnostic tests catalogue', () => {
   test('POST test negative price → 422', async () => {
     const centre = await createCentre();
     expectErrorShape(await createTest(centre.body.id, { price: -50 }), 422);
+  });
+
+  test.each([0, 0.001, 299.999, true, [42], '499'])('POST test with price %p → 422', async (price) => {
+    const centre = await createCentre();
+    expectErrorShape(await createTest(centre.body.id, { price }), 422, 'VALIDATION_ERROR');
+  });
+
+  test('the database rejects a non-positive price even without the API', async () => {
+    const centre = await createCentre();
+    await expect(
+      prisma.diagnosticTest.create({ data: { centreId: centre.body.id, name: tag('Free'), price: 0 } })
+    ).rejects.toThrow(/DiagnosticTest_price_positive/);
   });
 
   test('POST test duplicate name in same centre → 409', async () => {

@@ -188,11 +188,41 @@ describe('Idempotency-Key', () => {
   });
 });
 
+describe('Appointment time', () => {
+  const moveToPast = (id) => prisma.booking.update({ where: { id }, data: { appointmentAt: new Date(Date.now() - 60000) } });
+
+  test('paying after the appointment time → 409 APPOINTMENT_PASSED', async () => {
+    const booking = await makeBooking();
+    await moveToPast(booking.id);
+    expectErrorShape(await pay(booking.id, { simulate: 'SUCCESS' }), 409, 'APPOINTMENT_PASSED');
+  });
+
+  test('a confirmed booking cannot be cancelled after its appointment; an unpaid one can', async () => {
+    const paid = await makeBooking();
+    await pay(paid.id, { simulate: 'SUCCESS' });
+    await moveToPast(paid.id);
+    expectErrorShape(await cancel(paid.id), 409, 'APPOINTMENT_PASSED');
+
+    const unpaid = await makeBooking();
+    await moveToPast(unpaid.id);
+    expect((await cancel(unpaid.id)).status).toBe(200);
+  });
+});
+
 describe('Cancelling and payments', () => {
   test('cancel while a payment is PENDING → 409 PAYMENT_IN_PROGRESS', async () => {
     const { booking } = await pendingPayment();
     expectErrorShape(await cancel(booking.id), 409, 'PAYMENT_IN_PROGRESS');
     expect((await bookingRow(booking.id)).status).toBe('PENDING');
+  });
+
+  test('booking detail and cancel responses never expose the idempotency key', async () => {
+    const booking = await makeBooking();
+    await pay(booking.id, { simulate: 'SUCCESS', key: idemKey() });
+    const detail = await request(getApp()).get(`/api/v1/bookings/${booking.id}`).set(authHeader(alice.token));
+    expect(detail.body.payments[0]).not.toHaveProperty('idempotencyKey');
+    const cancelled = await cancel(booking.id);
+    expect(cancelled.body.payments[0]).not.toHaveProperty('idempotencyKey');
   });
 
   test('cancelling a CONFIRMED booking refunds its payment', async () => {

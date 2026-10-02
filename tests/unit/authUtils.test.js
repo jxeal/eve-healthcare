@@ -11,9 +11,8 @@ describe('password utils', () => {
 });
 
 describe('jwt utils', () => {
-  test('sign + verify round-trip keeps sub and role', () => {
-    const decoded = jwt.verify(jwt.sign({ sub: 'user-123', role: 'ADMIN' }));
-    expect(decoded).toMatchObject({ sub: 'user-123', role: 'ADMIN' });
+  test('sign + verify round-trip keeps the subject', () => {
+    expect(jwt.verify(jwt.sign({ sub: 'user-123', email: 'a@b.c' }))).toMatchObject({ sub: 'user-123', email: 'a@b.c' });
   });
 
   test('garbage token throws', () => {

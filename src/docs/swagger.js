@@ -43,7 +43,7 @@ const options = {
           type: 'object',
           properties: {
             name: { type: 'string' },
-            price: { type: 'number', exclusiveMinimum: 0 },
+            price: { type: 'number', exclusiveMinimum: 0, multipleOf: 0.01 },
             description: { type: 'string' },
             isActive: { type: 'boolean' },
           },

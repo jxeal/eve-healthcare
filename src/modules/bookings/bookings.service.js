@@ -3,6 +3,7 @@
 const { prisma } = require('../../config/db');
 const { ApiError } = require('../../utils/errors');
 const { parsePagination, buildPagination } = require('../../utils/pagination');
+const { publicPaymentSelect } = require('../payments/publicPayment');
 
 // The only place booking status changes are defined. Anything missing is forbidden.
 const TRANSITIONS = {
@@ -17,7 +18,10 @@ function nextStatus(from, event) {
 }
 
 const BOOKING_INCLUDE = { centre: true, test: true };
-const BOOKING_DETAIL_INCLUDE = { ...BOOKING_INCLUDE, payments: { orderBy: { createdAt: 'asc' } } };
+const BOOKING_DETAIL_INCLUDE = {
+  ...BOOKING_INCLUDE,
+  payments: { orderBy: { createdAt: 'asc' }, select: publicPaymentSelect },
+};
 
 const bookingNotFound = () => new ApiError(404, 'NOT_FOUND', 'Booking not found');
 
@@ -78,6 +82,9 @@ async function cancelBooking(userId, id) {
     assertOwner(booking, userId);
     const status = nextStatus(booking.status, 'CANCEL');
     if (!status) throw new ApiError(409, 'BOOKING_NOT_CANCELLABLE', `A ${booking.status} booking cannot be cancelled`);
+    if (booking.status === 'CONFIRMED' && booking.appointmentAt <= new Date()) {
+      throw new ApiError(409, 'APPOINTMENT_PASSED', 'A confirmed booking cannot be cancelled after its appointment');
+    }
     const inFlight = await tx.payment.count({ where: { bookingId: id, status: 'PENDING' } });
     if (inFlight) {
       throw new ApiError(409, 'PAYMENT_IN_PROGRESS', 'A payment is in progress; cancel after it settles');

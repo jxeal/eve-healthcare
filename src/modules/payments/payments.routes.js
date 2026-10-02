@@ -39,7 +39,7 @@ const router = express.Router();
  *       200: { description: Idempotent replay of an existing attempt }
  *       403: { description: Not the booking owner }
  *       404: { description: Booking not found }
- *       409: { description: 'BOOKING_CANCELLED, PAYMENT_ALREADY_EXISTS or PAYMENT_IN_PROGRESS' }
+ *       409: { description: 'BOOKING_CANCELLED, PAYMENT_ALREADY_EXISTS, APPOINTMENT_PASSED or PAYMENT_IN_PROGRESS' }
  *       422: { description: Validation error or IDEMPOTENCY_KEY_REUSED for another booking }
  */
 router.post('/', auth, paymentsLimiter, validate(createPaymentSchema), controller.createPayment);

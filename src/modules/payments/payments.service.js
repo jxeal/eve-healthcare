@@ -6,11 +6,8 @@ const { scopedKey } = require('../../utils/idempotency');
 const logger = require('../../utils/logger');
 const bookings = require('../bookings/bookings.service');
 const gateway = require('./mockGateway');
+const { toPublicPayment } = require('./publicPayment');
 
-function toPublic(payment) {
-  const { idempotencyKey: _key, booking: _booking, ...rest } = payment;
-  return rest;
-}
 
 // Inserts a PENDING attempt under the booking lock *before* charging, so concurrent
 // requests can never reach the gateway twice for one booking.
@@ -34,6 +31,9 @@ async function claimAttempt(userId, bookingId, keyHash) {
     }
     if (booking.status === 'CONFIRMED') {
       throw new ApiError(409, 'PAYMENT_ALREADY_EXISTS', 'Booking is already paid');
+    }
+    if (booking.appointmentAt <= new Date()) {
+      throw new ApiError(409, 'APPOINTMENT_PASSED', 'The appointment time has passed');
     }
     const inFlight = await tx.payment.findFirst({ where: { bookingId, status: 'PENDING' } });
     if (inFlight) throw new ApiError(409, 'PAYMENT_IN_PROGRESS', 'A payment for this booking is in progress');
@@ -76,7 +76,7 @@ async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
 
   if (claim.replay) {
     logger.info({ event: 'payment.idempotent_replay', paymentId: claim.payment.id, bookingId });
-    return { payment: toPublic(claim.payment), replay: true };
+    return { payment: toPublicPayment(claim.payment), replay: true };
   }
 
   const result = await gateway.charge({ simulate });
@@ -84,7 +84,7 @@ async function createPayment(userId, { bookingId, simulate, idempotencyKey }) {
     applyPaymentStatus(tx, claim.payment.id, result.status, result.providerTxnId)
   );
   logger.info({ event: 'payment.charged', paymentId: payment.id, bookingId, status: payment.status });
-  return { payment: toPublic(payment), replay: false };
+  return { payment: toPublicPayment(payment), replay: false };
 }
 
 async function getPaymentById(userId, id) {
@@ -94,7 +94,7 @@ async function getPaymentById(userId, id) {
   });
   if (!payment) throw new ApiError(404, 'NOT_FOUND', 'Payment not found');
   if (payment.booking.userId !== userId) throw new ApiError(403, 'FORBIDDEN', 'You do not own this payment');
-  return toPublic(payment);
+  return toPublicPayment(payment);
 }
 
 module.exports = { createPayment, getPaymentById, applyPaymentStatus };
