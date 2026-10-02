@@ -5,6 +5,8 @@ process.env.WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || 'test-webhook-secret'
 process.env.DATABASE_URL =
   process.env.DATABASE_URL_TEST || process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/eve_test';
 process.env.REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
+// Set before dotenv runs, so a LOG_LEVEL in .env can't flood the test output.
+process.env.LOG_LEVEL = 'silent';
 process.env.RATE_LIMIT_AUTH_MAX = '10000';
 process.env.RATE_LIMIT_PAYMENTS_MAX = '10000';
 process.env.RATE_LIMIT_WEBHOOK_MAX = '10000';
