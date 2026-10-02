@@ -41,6 +41,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:?set WEBHOOK_SECRET}
       JWT_EXPIRES_IN: 1h
+      TRUST_PROXY: ${TRUST_PROXY:-}
       LOG_LEVEL: info
     depends_on:
       postgres:

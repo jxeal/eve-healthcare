@@ -208,7 +208,9 @@ the signal.
 - Redis caches centre and test reads for 60 s and degrades to the database when Redis is down.
   Writes invalidate the affected keys with `SCAN`, never `KEYS`.
 - Rate limits: auth 20 per 15 min per IP, payments 30 per minute per user, webhook 100 per minute
-  per IP. The `RATE_LIMIT_*` env vars override them, which the test suite uses.
+  per IP. The `RATE_LIMIT_*` env vars override them, which the test suite uses. Behind a load
+  balancer, set `TRUST_PROXY` to the number of proxy hops (usually `1`) so the limits key on the
+  client's IP rather than the proxy's.
 - pino writes structured JSON logs (`payment.charged`, `webhook.processed`, `webhook.deduped`,
   `webhook.process_failed`, ...). The request logger replaces the `Authorization` and
   `X-Webhook-Signature` headers with `[REDACTED]`, and request bodies (so passwords) are never logged.

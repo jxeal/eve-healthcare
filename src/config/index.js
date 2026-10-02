@@ -9,6 +9,13 @@ function int(name, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+// Express "trust proxy" accepts a hop count, true, or a list of trusted proxy addresses.
+function trustProxy(raw) {
+  if (!raw || raw === 'false') return false;
+  if (raw === 'true') return true;
+  return /^\d+$/.test(raw) ? Number(raw) : raw;
+}
+
 const MIN_SECRET_LENGTH = 32;
 
 function secret(name, devFallback) {
@@ -23,6 +30,7 @@ function secret(name, devFallback) {
 module.exports = {
   env,
   port: int('PORT', 3000),
+  trustProxy: trustProxy(process.env.TRUST_PROXY),
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
   jwtSecret: secret('JWT_SECRET', 'dev-jwt-secret'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1h',

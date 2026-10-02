@@ -4,6 +4,7 @@ const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
+const config = require('./config');
 const swaggerSpec = require('./docs/swagger');
 const requestLogger = require('./middlewares/requestLogger');
 const { errorHandler, notFound } = require('./middlewares/errorHandler');
@@ -14,6 +15,7 @@ const bookingsRoutes = require('./modules/bookings/bookings.routes');
 const paymentsRoutes = require('./modules/payments/payments.routes');
 
 const app = express();
+app.set('trust proxy', config.trustProxy);
 
 // CSP disabled so the bundled Swagger UI (inline scripts/styles) renders.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
